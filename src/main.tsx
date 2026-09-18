@@ -82,6 +82,14 @@ class RootErrorBoundary extends React.Component<
 
 const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
 
+// Apply the persisted theme before first paint to avoid a flash of the wrong mode.
+(function initTheme() {
+  const stored = localStorage.getItem("threatly-theme");
+  const dark =
+    stored ? stored === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.classList.toggle("dark", dark);
+})();
+
 
 
 function RouteSyncer() {

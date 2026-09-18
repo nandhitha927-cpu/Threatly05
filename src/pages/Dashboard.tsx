@@ -40,6 +40,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAuth } from "@/hooks/use-auth";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { useNavigate } from "react-router";
 import {
   analyzeText,
@@ -82,10 +83,10 @@ Customer: Thanks, bye.
 Support: Bye! Take care.`;
 
 const riskStyles: Record<string, string> = {
-  Low: "bg-emerald-500/10 text-emerald-700 border-emerald-500/25",
-  Medium: "bg-amber-500/10 text-amber-700 border-amber-500/25",
-  High: "bg-orange-500/10 text-orange-700 border-orange-500/25",
-  Critical: "bg-red-500/10 text-red-700 border-red-500/25",
+  Low: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/25",
+  Medium: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25",
+  High: "bg-orange-500/10 text-orange-700 dark:text-orange-300 border-orange-500/25",
+  Critical: "bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/25",
 };
 
 function StatCard({
@@ -103,7 +104,7 @@ function StatCard({
     <Card className="glass-panel border-white/70 shadow-none">
       <CardHeader className="pb-2">
         <CardDescription className="flex items-center gap-1.5 text-xs font-medium">
-          <Icon className="size-3.5 text-blue-600" />
+          <Icon className="size-3.5 text-blue-600 dark:text-blue-300" />
           {label}
         </CardDescription>
         <CardTitle className="text-2xl tracking-tight">{value}</CardTitle>
@@ -263,7 +264,7 @@ export default function Dashboard() {
       <header className="sticky top-0 z-20 border-b border-border/60 bg-background/70 backdrop-blur-xl">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-3.5">
           <div className="flex items-center gap-2.5">
-            <div className="flex size-8 items-center justify-center rounded-lg bg-blue-600/10 text-blue-700">
+            <div className="flex size-8 items-center justify-center rounded-lg bg-blue-600/10 text-blue-700 dark:text-blue-300">
               <ShieldCheck className="size-4" />
             </div>
             <div>
@@ -297,6 +298,7 @@ export default function Dashboard() {
                 Analytics
               </Button>
             </div>
+            <ThemeToggle />
             <Button
               type="button"
               variant="outline"
@@ -321,7 +323,7 @@ export default function Dashboard() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <CardTitle className="flex items-center gap-2 tracking-tight">
-                  <ScanSearch className="size-5 text-blue-600" />
+                  <ScanSearch className="size-5 text-blue-600 dark:text-blue-300" />
                   Analyze a conversation
                 </CardTitle>
                 <CardDescription className="mt-1">
@@ -350,7 +352,7 @@ export default function Dashboard() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Paste the customer message here…"
-              className="min-h-40 resize-y border-border/70 bg-white/60 text-sm"
+              className="min-h-40 resize-y border-border/70 bg-white/60 dark:bg-white/5 text-sm"
             />
             <div className="flex flex-wrap items-center gap-2">
               <Input
@@ -358,7 +360,7 @@ export default function Dashboard() {
                 value={expectedDomain}
                 onChange={(e) => setExpectedDomain(e.target.value)}
                 placeholder="Your org domain (e.g. acme.com) — improves sender checks"
-                className="h-9 max-w-xs border-border/70 bg-white/60 text-xs"
+                className="h-9 max-w-xs border-border/70 bg-white/60 dark:bg-white/5 text-xs"
               />
               <Button type="button" onClick={analyze} disabled={!input.trim()} className="gap-2">
                 <ScanSearch className="size-4" />
@@ -402,9 +404,9 @@ export default function Dashboard() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="flex items-center gap-2 font-semibold tracking-tight">
                     {result.security.hasThreat ? (
-                      <ShieldAlert className="size-5 text-red-600" />
+                      <ShieldAlert className="size-5 text-red-600 dark:text-red-400" />
                     ) : (
-                      <ShieldCheck className="size-5 text-emerald-600" />
+                      <ShieldCheck className="size-5 text-emerald-600 dark:text-emerald-400" />
                     )}
                     {combined.threatVerdict}
                   </p>
@@ -421,7 +423,7 @@ export default function Dashboard() {
                   {/* Customer intelligence */}
                   <div className="rounded-xl border border-border/60 bg-background/50 p-3.5">
                     <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      <Tag className="size-3.5 text-blue-600" />
+                      <Tag className="size-3.5 text-blue-600 dark:text-blue-300" />
                       Customer intelligence
                     </p>
                     <ul className="mt-2 grid gap-1 text-sm">
@@ -452,7 +454,7 @@ export default function Dashboard() {
                   {/* Security intelligence */}
                   <div className="rounded-xl border border-border/60 bg-background/50 p-3.5">
                     <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      <ShieldAlert className="size-3.5 text-orange-600" />
+                      <ShieldAlert className="size-3.5 text-orange-600 dark:text-orange-400" />
                       Security intelligence
                     </p>
                     <ul className="mt-2 grid gap-1 text-sm">
@@ -466,7 +468,7 @@ export default function Dashboard() {
                       </li>
                       <li>
                         <span className="text-muted-foreground">Social engineering: </span>
-                        <span className={combined.security.socialEngineering ? "font-semibold text-orange-700" : "font-medium"}>
+                        <span className={combined.security.socialEngineering ? "font-semibold text-orange-700 dark:text-orange-300" : "font-medium"}>
                           {combined.security.socialEngineering ? "Yes" : "No"}
                         </span>
                         {combined.security.socialEngineering && (
@@ -475,19 +477,19 @@ export default function Dashboard() {
                       </li>
                       <li>
                         <span className="text-muted-foreground">Suspicious URL: </span>
-                        <span className={combined.security.suspiciousUrl ? "font-semibold text-red-700" : "font-medium"}>
+                        <span className={combined.security.suspiciousUrl ? "font-semibold text-red-700 dark:text-red-300" : "font-medium"}>
                           {combined.security.suspiciousUrl ? "Detected" : "None"}
                         </span>
                       </li>
                       <li>
                         <span className="text-muted-foreground">Credential request: </span>
-                        <span className={combined.security.credentialRequest ? "font-semibold text-red-700" : "font-medium"}>
+                        <span className={combined.security.credentialRequest ? "font-semibold text-red-700 dark:text-red-300" : "font-medium"}>
                           {combined.security.credentialRequest ? "Detected" : "None"}
                         </span>
                       </li>
                       <li>
                         <span className="text-muted-foreground">OTP request: </span>
-                        <span className={combined.security.otpRequest ? "font-semibold text-red-700" : "font-medium"}>
+                        <span className={combined.security.otpRequest ? "font-semibold text-red-700 dark:text-red-300" : "font-medium"}>
                           {combined.security.otpRequest ? "Detected" : "None"}
                         </span>
                       </li>
@@ -508,7 +510,7 @@ export default function Dashboard() {
               <Card className="glass-panel border-white/70 shadow-none">
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-base tracking-tight">
-                    <Sparkles className="size-4 text-blue-600" />
+                    <Sparkles className="size-4 text-blue-600 dark:text-blue-300" />
                     Conversation summary
                   </CardTitle>
                   <CardDescription>
@@ -585,7 +587,7 @@ export default function Dashboard() {
             <Card className="glass-panel border-white/70 shadow-none">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base tracking-tight">
-                  <ListFilter className="size-4 text-blue-600" />
+                  <ListFilter className="size-4 text-blue-600 dark:text-blue-300" />
                   Intelligence detail
                 </CardTitle>
               </CardHeader>
@@ -613,13 +615,13 @@ export default function Dashboard() {
                   <TabsContent value="summary" className="mt-4 grid gap-3">
                     {result.urgent.isUrgent && (
                       <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4">
-                        <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-red-700">
+                        <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-red-700 dark:text-red-300">
                           <ShieldAlert className="size-3.5" />
                           Requires immediate attention
                         </p>
                         <div className="mt-2 flex flex-wrap gap-1.5">
                           {result.urgent.reasons.map((reason) => (
-                            <Badge key={reason} className="border-red-500/25 bg-red-500/10 text-red-700 shadow-none">
+                            <Badge key={reason} className="border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300 shadow-none">
                               {reason}
                             </Badge>
                           ))}
@@ -653,9 +655,9 @@ export default function Dashboard() {
                               <Badge
                                 className={
                                   t.role === "customer"
-                                    ? "shrink-0 border-blue-500/25 bg-blue-500/10 text-blue-700 shadow-none"
+                                    ? "shrink-0 border-blue-500/25 bg-blue-500/10 text-blue-700 dark:text-blue-300 shadow-none"
                                     : t.role === "support"
-                                      ? "shrink-0 border-emerald-500/25 bg-emerald-500/10 text-emerald-700 shadow-none"
+                                      ? "shrink-0 border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 shadow-none"
                                       : "shrink-0 shadow-none"
                                 }
                               >
@@ -670,9 +672,9 @@ export default function Dashboard() {
                               <Badge
                                 className={`shrink-0 border shadow-none ${
                                   t.status === "Resolved"
-                                    ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700"
+                                    ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
                                     : t.status === "Unresolved"
-                                      ? "border-orange-500/25 bg-orange-500/10 text-orange-700"
+                                      ? "border-orange-500/25 bg-orange-500/10 text-orange-700 dark:text-orange-300"
                                       : ""
                                 }`}
                               >
@@ -683,7 +685,7 @@ export default function Dashboard() {
                         </div>
                         {result.resolution.followUp.openPromises.length > 0 && (
                           <div className="mt-3 rounded-lg border border-orange-500/25 bg-orange-500/5 p-3">
-                            <p className="text-[11px] font-semibold uppercase tracking-wider text-orange-700">
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-orange-700 dark:text-orange-300">
                               Unclosed support promises
                             </p>
                             <ul className="mt-1.5 list-inside list-disc text-xs text-muted-foreground">
@@ -694,7 +696,7 @@ export default function Dashboard() {
                           </div>
                         )}
                         {result.resolution.followUp.needsFollowUp && (
-                          <p className="mt-2 text-xs font-medium text-orange-700">
+                          <p className="mt-2 text-xs font-medium text-orange-700 dark:text-orange-300">
                             {result.resolution.followUp.lastSpeaker === "customer"
                               ? "Conversation ends with the customer — follow-up recommended."
                               : "Issue remains open — schedule a follow-up."}
@@ -764,32 +766,32 @@ export default function Dashboard() {
                             </div>
                             <div>
                               <span className="text-muted-foreground">HTTPS: </span>
-                              <span className={u.https ? "text-emerald-700" : "font-semibold text-red-700"}>
+                              <span className={u.https ? "text-emerald-700 dark:text-emerald-300" : "font-semibold text-red-700 dark:text-red-300"}>
                                 {u.https ? "Yes" : "No"}
                               </span>
                             </div>
                             <div>
                               <span className="text-muted-foreground">IP host: </span>
-                              <span className={u.isIpHost ? "font-semibold text-red-700" : "font-mono"}>
+                              <span className={u.isIpHost ? "font-semibold text-red-700 dark:text-red-300" : "font-mono"}>
                                 {u.isIpHost ? "Yes" : "No"}
                               </span>
                             </div>
                             <div>
                               <span className="text-muted-foreground">Shortener: </span>
-                              <span className={u.isShortener ? "font-semibold text-orange-700" : "font-mono"}>
+                              <span className={u.isShortener ? "font-semibold text-orange-700 dark:text-orange-300" : "font-mono"}>
                                 {u.isShortener ? "Yes" : "No"}
                               </span>
                             </div>
                             <div>
                               <span className="text-muted-foreground">Creds in URL: </span>
-                              <span className={u.hasCredentialsInUrl ? "font-semibold text-red-700" : "font-mono"}>
+                              <span className={u.hasCredentialsInUrl ? "font-semibold text-red-700 dark:text-red-300" : "font-mono"}>
                                 {u.hasCredentialsInUrl ? "Yes" : "No"}
                               </span>
                             </div>
                             <div className="col-span-2 sm:col-span-3">
                               <span className="text-muted-foreground">Redirects: </span>
                               {u.redirectHints.length > 0 ? (
-                                <span className="font-semibold text-orange-700">{u.redirectHints.length} hint(s)</span>
+                                <span className="font-semibold text-orange-700 dark:text-orange-300">{u.redirectHints.length} hint(s)</span>
                               ) : (
                                 <span className="font-mono">none detected</span>
                               )}
@@ -848,7 +850,7 @@ export default function Dashboard() {
                           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
                             <span>
                               <span className="text-muted-foreground">Free-mail: </span>
-                              <span className={e.isFreeMail ? "font-semibold text-orange-700" : "font-mono"}>
+                              <span className={e.isFreeMail ? "font-semibold text-orange-700 dark:text-orange-300" : "font-mono"}>
                                 {e.isFreeMail ? "Yes" : "No"}
                               </span>
                             </span>
@@ -860,7 +862,7 @@ export default function Dashboard() {
                             </span>
                             <span>
                               <span className="text-muted-foreground">Domain mismatch: </span>
-                              <span className={e.domainMismatch ? "font-semibold text-red-700" : "font-mono"}>
+                              <span className={e.domainMismatch ? "font-semibold text-red-700 dark:text-red-300" : "font-mono"}>
                                 {e.domainMismatch ? "Yes" : "No"}
                               </span>
                             </span>
@@ -911,13 +913,13 @@ export default function Dashboard() {
                           key={s.signal}
                           className="flex items-start gap-3 rounded-xl border border-red-500/25 bg-red-500/5 p-3.5"
                         >
-                          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-red-600" />
+                          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-red-600 dark:text-red-400" />
                           <div className="min-w-0">
                             <p className="text-sm font-medium">{s.signal}</p>
                             <p className="mt-0.5 text-xs text-muted-foreground">{s.detail}</p>
                           </div>
                           <Badge
-                            className="ml-auto shrink-0 border-red-500/25 bg-red-500/10 text-red-700 shadow-none"
+                            className="ml-auto shrink-0 border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300 shadow-none"
                           >
                             +{s.weight}
                           </Badge>
@@ -937,7 +939,7 @@ export default function Dashboard() {
                           key={t.technique}
                           className="flex items-start gap-3 rounded-xl border border-orange-500/25 bg-orange-500/5 p-3.5"
                         >
-                          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-orange-600" />
+                          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-orange-600 dark:text-orange-400" />
                           <div>
                             <p className="text-sm font-medium">{t.technique}</p>
                             <p className="mt-0.5 text-xs text-muted-foreground">{t.reason}</p>
@@ -954,7 +956,7 @@ export default function Dashboard() {
             <Card className="glass-panel border-white/70 shadow-none">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base tracking-tight">
-                  <FileText className="size-4 text-blue-600" />
+                  <FileText className="size-4 text-blue-600 dark:text-blue-300" />
                   Structured result
                 </CardTitle>
                 <CardDescription>
@@ -962,7 +964,7 @@ export default function Dashboard() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="rounded-xl border bg-white/60 p-4 font-mono text-xs leading-relaxed text-foreground/90">
+                <div className="rounded-xl border bg-white/60 dark:bg-white/5 p-4 font-mono text-xs leading-relaxed text-foreground/90">
                   <div className="grid gap-1.5">
                     <p>
                       <span className="text-muted-foreground">Conversation ID:</span>{" "}
@@ -996,7 +998,7 @@ export default function Dashboard() {
                     <div className="my-1 border-t border-dashed" />
                     <p>
                       <span className="text-muted-foreground">Security Analysis:</span>{" "}
-                      <span className={result.security.hasThreat ? "font-semibold text-red-600" : "font-semibold text-emerald-600"}>
+                      <span className={result.security.hasThreat ? "font-semibold text-red-600 dark:text-red-400" : "font-semibold text-emerald-600 dark:text-emerald-400"}>
                         {result.security.hasThreat ? "Potential Threat Detected" : "No Threat Detected"}
                       </span>
                     </p>
@@ -1042,7 +1044,7 @@ export default function Dashboard() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <CardTitle className="flex items-center gap-2 text-base tracking-tight">
-                    <TrendingUp className="size-4 text-blue-600" />
+                    <TrendingUp className="size-4 text-blue-600 dark:text-blue-300" />
                     Frequently reported issues
                   </CardTitle>
                   <CardDescription>
@@ -1095,7 +1097,7 @@ export default function Dashboard() {
           <Card className="glass-panel mt-6 border-white/70 shadow-none">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base tracking-tight">
-                <Inbox className="size-4 text-blue-600" />
+                <Inbox className="size-4 text-blue-600 dark:text-blue-300" />
                 Session log ({history.length})
               </CardTitle>
               <CardDescription>
@@ -1129,7 +1131,7 @@ export default function Dashboard() {
                       </TableCell>
                       <TableCell className="hidden sm:table-cell">
                         {h.urgent.isUrgent ? (
-                          <Badge className="border-red-500/25 bg-red-500/10 text-red-700 shadow-none">
+                          <Badge className="border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300 shadow-none">
                             ⚡ {h.urgent.reasons[0]}
                           </Badge>
                           ) : (

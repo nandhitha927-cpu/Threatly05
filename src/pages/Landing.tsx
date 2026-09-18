@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import logo from "@/assets/logo.svg";
 
 const FEATURES = [
@@ -67,7 +68,7 @@ export default function Landing() {
         className="pointer-events-none fixed inset-0"
         style={{
           background:
-            "radial-gradient(38rem 30rem at 78% 12%, rgb(59 130 246 / 0.12), transparent 65%), radial-gradient(34rem 26rem at 10% 88%, rgb(16 185 129 / 0.10), transparent 60%)",
+            "radial-gradient(38rem 30rem at 78% 12%, rgb(59 130 246 / var(--glow-a, 0.12)), transparent 65%), radial-gradient(34rem 26rem at 10% 88%, rgb(16 185 129 / var(--glow-b, 0.10)), transparent 60%)",
         }}
       />
 
@@ -77,6 +78,7 @@ export default function Landing() {
           <span className="text-lg font-semibold tracking-tight">Threatly</span>
         </div>
         <nav className="flex items-center gap-2">
+          <ThemeToggle />
           <Button asChild variant="ghost" className="hidden sm:inline-flex">
             <a href="#features">Features</a>
           </Button>
@@ -136,7 +138,7 @@ export default function Landing() {
         >
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <span className="glass-chip inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-medium">
-              <Inbox className="size-3.5 text-blue-600" /> Inbound: customer email
+              <Inbox className="size-3.5 text-blue-600 dark:text-blue-300" /> Inbound: customer email
             </span>
             <span className="glass-chip inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-medium">
               <ScanSearch className="size-3.5 text-sky-600" /> Analysis complete
@@ -207,7 +209,7 @@ export default function Landing() {
               transition={{ duration: 0.4, delay: i * 0.05 }}
               className="glass-panel rounded-2xl p-6 transition-transform duration-200 hover:-translate-y-1"
             >
-              <div className="flex size-10 items-center justify-center rounded-lg bg-blue-600/10 text-blue-700">
+              <div className="flex size-10 items-center justify-center rounded-lg bg-blue-600/10 text-blue-700 dark:text-blue-300">
                 <f.icon className="size-5" />
               </div>
               <h3 className="mt-4 font-semibold tracking-tight">{f.title}</h3>

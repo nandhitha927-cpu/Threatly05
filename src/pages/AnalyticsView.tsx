@@ -47,12 +47,12 @@ function KpiCard({
 }) {
   const toneClass =
     tone === "red"
-      ? "text-red-600"
+      ? "text-red-600 dark:text-red-400"
       : tone === "amber"
-        ? "text-amber-600"
+        ? "text-amber-600 dark:text-amber-400"
         : tone === "green"
-          ? "text-emerald-600"
-          : "text-blue-600";
+          ? "text-emerald-600 dark:text-emerald-400"
+          : "text-blue-600 dark:text-blue-300";
   return (
     <Card className="glass-panel border-white/70 shadow-none">
       <CardHeader className="pb-2">
