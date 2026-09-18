@@ -267,7 +267,7 @@ export default function Dashboard() {
               <ShieldCheck className="size-4" />
             </div>
             <div>
-              <p className="text-sm font-semibold leading-tight">InsightGuard Console</p>
+              <p className="text-sm font-semibold leading-tight">Threatly Console</p>
               <p className="text-xs text-muted-foreground">
                 {user?.email ?? "Signed in"} · {history.length} analyzed
                 {threatCount > 0 ? ` · ${threatCount} threats` : ""}

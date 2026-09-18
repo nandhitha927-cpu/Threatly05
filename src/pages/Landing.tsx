@@ -73,8 +73,8 @@ export default function Landing() {
 
       <header className="relative z-10 mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6">
         <div className="flex items-center gap-2.5">
-          <img src={logo} alt="InsightGuard logo" className="size-9 rounded-lg" />
-          <span className="text-lg font-semibold tracking-tight">InsightGuard</span>
+          <img src={logo} alt="Threatly logo" className="size-9 rounded-lg" />
+          <span className="text-lg font-semibold tracking-tight">Threatly</span>
         </div>
         <nav className="flex items-center gap-2">
           <Button asChild variant="ghost" className="hidden sm:inline-flex">
@@ -106,7 +106,7 @@ export default function Landing() {
             </span>
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg">
-            InsightGuard analyzes customer emails, chats and tickets to extract
+            Threatly analyzes customer emails, chats and tickets to extract
             complaint categories, sentiment and recurring issues — while scanning
             the same conversation for phishing URLs, lookalike senders and
             social-engineering attacks aimed at your support team.
@@ -257,7 +257,7 @@ export default function Landing() {
       </section>
 
       <footer className="relative z-10 border-t border-border/60 py-8 text-center text-sm text-muted-foreground">
-        InsightGuard — Customer Support Intelligence &amp; Phishing Threat Detection
+        Threatly — Customer Support Intelligence &amp; Phishing Threat Detection
       </footer>
     </motion.div>
   );

@@ -1,7 +1,7 @@
 {
-  "name": "freebuff.com application",
-  "short_name": "freebuff.com",
-  "description": "freebuff.com application",
+  "name": "Threatly",
+  "short_name": "Threatly",
+  "description": "Threatly — Customer Support Intelligence & Phishing Threat Detection",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

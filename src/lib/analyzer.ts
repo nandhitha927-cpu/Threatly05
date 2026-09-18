@@ -1,5 +1,5 @@
 /**
- * InsightGuard — rule-based intelligence engine (v1).
+ * Threatly — rule-based intelligence engine (v1).
  * Extracted intelligence model shared by the UI and the Convex action.
  */
 import { detectLanguage, LANG_LABELS, LEXICONS, type SupportedLang } from "./languages";
