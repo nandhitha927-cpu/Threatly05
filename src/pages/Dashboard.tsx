@@ -284,7 +284,7 @@ export default function Dashboard() {
                 icon={Tag}
                 label="Complaint category"
                 value={result.complaint.category}
-                hint={`Match score ${result.complaint.categoryScore}`}
+                hint={`Issue: ${result.complaint.issueLabel} · Match score ${result.complaint.categoryScore}`}
               />
               <StatCard
                 icon={Gauge}

@@ -95,6 +95,7 @@ export interface AnalysisResult {
     category: ComplaintCategory;
     categoryScore: number;
     issue: string;
+    issueLabel: string;
     priority: Priority;
   };
   sentiment: {
@@ -609,8 +610,49 @@ const UNRESOLVED_MARKERS = [
   "waiting", "again", "third time", "fourth time", "twice", "no reply",
   "not resolved", "unresolved", "nothing yet",
 ];
-
-// ─── main entry ─────────────────────────────────────────────────────────────
+const ISSUE_LABEL_RULES: [RegExp, string][] = [
+  [
+    /\bcharged (twice|two times|double|2x)\b|\bduplicate (charge|payment|transaction)\b/i,
+    "Duplicate Payment",
+  ],
+  [
+    /\bunauthorized (charge|transaction)\b|\bfraudulent (charge|transaction)\b/i,
+    "Unauthorized Charge",
+  ],
+  [
+    /\brefund\b[^.!?]{0,40}\b(delay|still|waiting|not received|week)\b/i,
+    "Refund Delay",
+  ],
+  [/\brefund\b|\bmoney back\b|\breimburse/i, "Refund Requested"],
+  [
+    /\bpayment(s)? (failed|declined|error|not going through)\b|\bcard (declined|rejected|failed|expired)\b|\btransaction (failed|declined)\b/i,
+    "Payment Failure",
+  ],
+  [
+    /\bcannot (log|sign) ?in\b|\bcan'?t (log|sign) ?in\b|\blocked out\b|\blogin (fail|issue|problem)\b/i,
+    "Login Failure",
+  ],
+  [/\bforgot(ten)? (my )?password\b|\bpassword reset\b/i, "Password Reset"],
+  [/\baccount (locked|suspended|disabled)\b/i, "Account Locked"],
+  [
+    /\border (not|never) (arrived|delivered)\b|\b(never|has not|hasn'?t|have not|haven'?t|still not|still hasn'?t|did not|didn'?t)\s+(been\s+)?(arrived|delivered|come|received)\b/i,
+    "Order Not Received",
+  ],
+  [/\bdelay(ed)?\b|\blost (package|parcel)\b/i, "Delivery Delay"],
+  [
+    /\b(broken|defective|faulty)\b|\bstopped working\b|\bdoesn'?t (work|turn on|charge)\b|\bmalfunction/i,
+    "Product Defect",
+  ],
+  [/\b(app|website|site|server|api|dashboard) (is )?(down|crash)/i, "Service Outage"],
+  [
+    /\b(compromised|hacked|breach(ed)?)\b|\bidentity theft\b/i,
+    "Account Security",
+  ],
+  [
+    /\bovercharged?\b|\bwrong (amount|price)\b|\bbilling (error|issue|problem)\b/i,
+    "Billing Dispute",
+  ],
+];
 
 export function analyzeText(raw: string): AnalysisResult {
   const text = raw.trim();
@@ -635,6 +677,26 @@ export function analyzeText(raw: string): AnalysisResult {
     if (score > categoryScore) {
       category = rule.category;
       categoryScore = score;
+    }
+  }
+
+  // spec example: "charged twice … please refund" → Billing/Payment, not Refund Request
+  const duplicateCharge =
+    /\bcharged (twice|two times|double|2x)\b/i.test(text) ||
+    /\bduplicate (charge|payment|transaction)\b/i.test(text);
+  if (
+    duplicateCharge &&
+    (category === "Refund Request" || category === "Payment / Transaction" || category === "Subscription Issue")
+  ) {
+    category = "Billing Problem";
+  }
+
+  // short issue tag, e.g. "Duplicate Payment", "Login Failure"
+  let issueLabel = "General Inquiry";
+  for (const [re, label] of ISSUE_LABEL_RULES) {
+    if (re.test(text)) {
+      issueLabel = label;
+      break;
     }
   }
 
@@ -844,7 +906,10 @@ export function analyzeText(raw: string): AnalysisResult {
   const priority: Priority =
     urgency === "Critical" || riskLevel === "Critical" || compromiseSignals >= 1
       ? "Critical"
-      : urgency === "High" || riskLevel === "High" || (moneyMentioned && sentimentLabel === "Negative")
+      : urgency === "High" ||
+          riskLevel === "High" ||
+          (moneyMentioned && sentimentLabel === "Negative") ||
+          issueLabel === "Duplicate Payment"
         ? "High"
         : riskLevel === "Medium" ? "Medium" : "Low";
 
@@ -857,7 +922,7 @@ export function analyzeText(raw: string): AnalysisResult {
     textLength: text.length,
     wordCount: text.split(/\s+/).filter(Boolean).length,
     language: "en",
-    complaint: { category, categoryScore, issue, priority },
+    complaint: { category, categoryScore, issue, issueLabel, priority },
     sentiment: { label: sentimentLabel, score: Math.round(sentimentScore * 10) / 10, emotion, urgency },
     keywords,
     resolution: { status: resolutionStatus, signals: resolutionSignals.slice(0, 6) },
