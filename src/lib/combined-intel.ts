@@ -33,8 +33,9 @@ export function buildCombinedIntel(r: AnalysisResult, rawText?: string): Combine
   const linkReference =
     !!rawText &&
     (/\b(click|tap|follow|open|go to)\b[^.!?]{0,24}\b(link|here|button|below|this)\b/i.test(rawText) ||
-      // multilingual click-through cues (es/fr/de/pt/hi)
-      /\b(haga clic|pulse|abra|cliquez|appuyez|ouvrez|klicken|tippen|\u00f6ffnen|clique|toque)\b[^.!?]{0,24}\b(aqu\u00ed|ici|hier|aqui|auf den link|no link|\u092f\u0939\u093e\u0901|\u0932\u093f\u0902\u0915)\b/i.test(rawText));
+      // multilingual click-through cues (es/fr/de/pt/hi/ml)
+      /\b(haga clic|pulse|abra|cliquez|appuyez|ouvrez|klicken|tippen|\u00f6ffnen|clique|toque)\b[^.!?]{0,24}\b(aqu\u00ed|ici|hier|aqui|auf den link|no link|\u092f\u0939\u093e\u0901|\u0932\u093f\u0902\u0915)\b/i.test(rawText) ||
+      /(\u0d15\u0d4d\u0d32\u0d3f\u0d15\u0d4d\u0d15\u0d4d|\u0d32\u0d3f\u0d19\u0d4d\u0d15\u0d4d|\u0d07\u0d35\u0d3f\u0d1f\u0d46)/.test(rawText));
 
   // threat verdict
   const threatVerdict = r.security.hasThreat
