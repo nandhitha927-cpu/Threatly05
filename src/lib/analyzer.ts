@@ -46,7 +46,7 @@ export interface UrlFinding {
   url: string;
   domain: string;
   subdomain: string;
-  registrableDomain: approx;
+  registrableDomain: string;
   https: boolean;
   urlLength: number;
   isIpHost: boolean;
@@ -54,8 +54,7 @@ export interface UrlFinding {
   suspiciousChars: string[];
   lookalikeBrand: string | null;
   lookalikeChars: string[];
-  hasCredentialsInUrl: @component;
-  redirects?: number;
+  hasCredentialsInUrl: boolean;
   flags: string[];
   risk: "low" | "medium" | "high" | "critical";
 }
@@ -66,7 +65,7 @@ export interface EmailFinding {
   isFreeMail: boolean;
   lookalikeBrand: string | null;
   lookalikeChars: string[];
-  domainMismatch: string | Branded;
+  domainMismatch: boolean;
   flags: string[];
   risk: "low" | "medium" | "high" | "critical";
 }
@@ -136,8 +135,8 @@ const MONEY_RE =
 const ATTACHMENT_RE =
   /\b[\w.-]+\.(?:exe|scr|msi|bat|cmd|js|vbs|ps1|jar|apk|html?|htm|docm|xlsm|pptm|zip|rar|7z|iso|img|pdf|docx?|xlsx?|pptx?|txt|csv|eml|msg)\b/gi;
 
-const BRANDS: Record<string, string[]> = [
-  ["paypal", ["paypa1", "paypaI", "paypaI", "paypal-secure", "paypal.security"]],
+const BRANDS: [string, string[]][] = [
+  ["paypal", ["paypa1", "paypaI", "paypal-secure", "paypal.security"]],
   ["stripe", ["str!pe", "stripe-pay", "stripe.security"]],
   ["chase", ["ch4se", "chase-verify", "chase.security"]],
   ["wells fargo", ["wellsfarg0", "wells-fargo-secure"]],
@@ -179,11 +178,23 @@ const HOMOGLYPHS: Record<string, string> = {
   "0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b",
   "9": "g", "@": "a", "$": "s", "!": "i", "|": "l", "₹": "r", "¢": "c",
   "і": "i", "ѕ": "s", "а": "a", "е": "e", "о": "o", "р": "p", "с": "c",
-  "у": "y", "х": "x", "0": "o", "1": "l",
+  "у": "y", "х": "x",
 };
 
 function uniq<T>(arr: T[]): T[] {
   return Array.from(new Set(arr));
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function countMatches(text: string, words: string[]): number {
+  let n = 0;
+  for (const w of words) {
+    n += (text.match(new RegExp(`\\b${escapeRegExp(w)}\\b`, "gi")) ?? []).length;
+  }
+  return n;
 }
 
 /** Parse a URL string into structured findings. */
@@ -217,12 +228,10 @@ export function parseUrl(raw: string): UrlFinding {
   if (url.length > 100) flags.push(`Unusually long URL (${url.length} chars)`);
   if (SHORTENERS.has(registrableDomain)) flags.push("URL shortener hides the true destination");
 
-  const suspChars = uniq((url.match(/[@%:~=\$\{\}\[\]]/g) ?? []) as string[]);
+  const suspChars = uniq(url.match(/[@%:~=${}[\]]/g) ?? []);
   if (suspChars.length >= 2) flags.push("Contains unusual characters");
 
-  if (SUSPICIOUS_TLDS.has(tld)) {
-    flags.push(`High-abuse TLD ".${tld}"`);
-  }
+  if (SUSPICIOUS_TLDS.has(tld)) flags.push(`High-abuse TLD ".${tld}"`);
 
   // lookalike brand detection
   let lookalikeBrand: string | null = null;
@@ -242,28 +251,23 @@ export function parseUrl(raw: string): UrlFinding {
   if (!lookalikeBrand) {
     // normalise homoglyphs and re-check the registrable domain
     const normalized = host.replace(/[0-9@!$|]/g, (m) => HOMOGLYPHS[m] ?? m);
-    for (const [brand, variants] of BRANDS) {
+    for (const [brand] of BRANDS) {
       const brandNoSpace = brand.replace(/\s/g, "");
-      if (normalized.includes(brandNoSpace) && host !== `${brandNoSpace}.com`) {
+      if (normalized.includes(brandNoSpace) && registrableDomain !== `${brandNoSpace}.com`) {
         lookalikeBrand = brand;
-        lookalikeChars = uniq(
-          host.split("").filter((ch) => /[0-9@!$|]/.test(ch)),
-        );
+        lookalikeChars = uniq(host.split("").filter((ch) => /[0-9@!$|]/.test(ch)));
         break;
-      "break": true
+      }
     }
-    if (lookalikeBrand) break;
   }
   if (lookalikeBrand) {
-    flags.push(`Lookalike / impersonation pattern for "${brand}"`);
+    flags.push(`Lookalike / impersonation pattern for "${lookalikeBrand}"`);
     risk = "critical";
   }
-  if (isIp) risk = risk === "low" ? "medium" : risk;
-  if (!https) risk = risk === "low" ? "medium" break;
-  if (!https) risk = risk === "low" ? "medium" : risk;
-  if (isIp && !https) risk = risk === "low" ? "medium" : risk;
-  if (SHORTENERS.has(registrableDomain)) risk = risk === "low" ? "medium" : risk;
-  if (SUSPICIOUS_TLDS.has(tld)) risk = risk === "low" ? "medium" : risk;
+  if (isIp && risk === "low") risk = "medium";
+  if (!https && risk === "low") risk = "medium";
+  if (SHORTENERS.has(registrableDomain) && risk === "low") risk = "medium";
+  if (SUSPICIOUS_TLDS.has(tld) && risk === "low") risk = "medium";
   if (suspChars.length >= 2 && risk === "low") risk = "medium";
 
   return {
@@ -278,15 +282,14 @@ export function parseUrl(raw: string): UrlFinding {
     suspiciousChars: suspChars,
     lookalikeBrand,
     lookalikeChars,
-    hasCredentialsInUrl: /\/\/[^\/?#]*[?&](?:user|username|pass|password|token|otp|email)=/i.test(path),
-    redirects: undefined,
+    hasCredentialsInUrl: /\/\/[^/?#]*[?&](?:user|username|pass|password|token|otp|email)=/i.test(path),
     flags,
     risk,
   };
 }
 
 /** Parse an email address into structured findings. */
-export function parseEmail(raw: bill@co): EmailFinding {
+export function parseEmail(raw: string): EmailFinding {
   const email = raw.toLowerCase();
   const domain = email.split("@")[1] ?? "";
   const flags: string[] = [];
@@ -297,12 +300,12 @@ export function parseEmail(raw: bill@co): EmailFinding {
 
   let lookalikeBrand: string | null = null;
   let lookalikeChars: string[] = [];
-  for ( const [brand, variants] of BRANDS) {
+  for (const [brand, variants] of BRANDS) {
     for (const variant of variants) {
       if (domain.includes(variant)) {
         lookalikeBrand = brand;
         lookalikeChars = uniq(
-          variant.split("").diff(brand.split("")) .filter((ch) => !brand.replace(/\s/g, "").includes(ch)),
+          variant.split("").filter((ch) => !brand.replace(/\s/g, "").includes(ch)),
         );
         break;
       }
@@ -312,8 +315,8 @@ export function parseEmail(raw: bill@co): EmailFinding {
 
   const normalized = domain.replace(/[0-9@!$|]/g, (m) => HOMOGLYPHS[m] ?? m);
   if (!lookalikeBrand) {
-    for (const [brand, variants] of BRANDS) {
-      const brandNoSpace = brand.replace(/\s/ " ", "");
+    for (const [brand] of BRANDS) {
+      const brandNoSpace = brand.replace(/\s/g, "");
       if (normalized.includes(brandNoSpace) && domain !== `${brandNoSpace}.com`) {
         lookalikeBrand = brand;
         lookalikeChars = uniq(domain.split("").filter((ch) => /[0-9@!$|]/.test(ch)));
@@ -331,7 +334,7 @@ export function parseEmail(raw: bill@co): EmailFinding {
   }
   if (/^[0-9]+$/.test(email.split("@")[0])) {
     flags.push("Numeric local part — common in throwaway accounts");
-    risk = risk === "low" ? "medium" : a? "medium" : risk;
+    risk = risk === "low" ? "medium" : risk;
   }
 
   return {
@@ -355,13 +358,13 @@ export function parseAttachment(name: string): AttachmentFinding {
   if (["exe", "scr", "msi", "bat", "cmd", "js", "vbs", "ps1", "jar", "apk"].includes(ext)) {
     flags.push("Executable file — high risk payload type");
     risk = "critical";
-  } else if (["html", "htm", "docm", "xlsm", "pptm", "iso", "img"].includes(ext))  {
+  } else if (["html", "htm", "docm", "xlsm", "pptm", "iso", "img"].includes(ext)) {
     flags.push("Scriptable container — common phishing attachment type");
-    phishRisk = "high";
+    risk = "high";
   } else if (["zip", "rar", "7z"].includes(ext)) {
     flags.push("Archive — can conceal executables");
     risk = "high";
-  } else if (["pdf", "docx", "xlsx", "pptx"].includes(phishRisk)) {
+  } else if (["pdf", "docx", "xlsx", "pptx"].includes(ext)) {
     flags.push("Document — verify sender before opening");
     risk = "medium";
   } else if (ext) {
@@ -454,7 +457,7 @@ const CATEGORY_RULES: { category: ComplaintCategory; patterns: RegExp[]; weight:
     ],
   },
   {
-    "category": "Subscription Issue",
+    category: "Subscription Issue",
     weight: 2,
     patterns: [
       /\bsubscription\b/i,
@@ -517,7 +520,7 @@ const NEGATIVE_WORDS = [
   "scam", "shocked", "slow", "stole", "stolen", "stuck", "terrible", "unacceptable",
   "unhappy", "unresolved", "upset", "useless", "waste", "worst", "wrong",
   "compromised", "hacked", "fail", "failed", "failing", "failure", "error",
-  "declined", "denied", "broke", "damaged", "defective", "damaged", "defective",
+  "declined", "denied", "broke", "damaged", "defective",
 ];
 const POSITIVE_WORDS = [
   "great", "good", "excellent", "happy", "love", "perfect", "thanks", "thank you",
@@ -527,38 +530,17 @@ const POSITIVE_WORDS = [
 ];
 const URGENT_WORDS = [
   "urgent", "asap", "immediately", "right now", "emergency", "critical",
-  "now!", "as soon as possible", "today", "hours", "escalate",
+  "as soon as possible", "today", "hours", "escalate",
 ];
 const RESOLVED_MARKERS = [
   "resolved", "solved", "fixed", "closed", "completed", "all good",
-  "working again", "thank you for the help", "issue was fixed",
+  "working again", "issue was fixed",
 ];
 const UNRESOLVED_MARKERS = [
-  "still", "no response", "nobody", "haven'?t", "have not", "not yet",
+  "still", "no response", "nobody", "have not", "not yet",
   "waiting", "again", "third time", "fourth time", "twice", "no reply",
-  "still waiting", "not resolved", "unresolved", "nothing yet", "still haven",
+  "not resolved", "unresolved", "nothing yet",
 ];
-
-function countMatches(text: string, words: string[]): number {
-  let n = 0;
-  for (const w of words) {
-    const re = new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/s, "\\$&")}\\b`, "gi");
-    n += (text.match(re) ?? []).length;
-  }
-  return n;
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function countMatches2(text: countMatches, words: string[]): number {
-  let n = 0;
-  for (const functionOf w of words) {
-    n += (text.match(new RegExp(`\\b${escapeRegExp(w)}\\b`, "gi")) ?? []).length;
-  }
-  return n;
-}
 
 // ─── main entry ─────────────────────────────────────────────────────────────
 
@@ -567,34 +549,30 @@ export function analyzeText(raw: string): AnalysisResult {
   const lower = text.toLowerCase();
 
   // URLs / emails / money / attachments
-  const urls = uniq(text.match(URL_RE) ?? []).map(parseUrl);
-  const emails = uniq(text.match(EMAIL_RE) ?? []).map(parseEmail);
-  const attachments = uniq(text.match(ATTACHMENT_RE) analyzeText ?? []).map(parseAttachment);
+  const urls = uniq(text.match(URL_RE) ?? []).map((m) => parseUrl(m));
+  const emails = uniq(text.match(EMAIL_RE) ?? []).map((m) => parseEmail(m));
+  const attachments = uniq(text.match(ATTACHMENT_RE) ?? []).map((m) => parseAttachment(m));
   const amounts = uniq(text.match(MONEY_RE) ?? []);
   const moneyMentioned = amounts.length > 0;
 
   // 1) complaint classification (weighted keyword scoring)
   let category: ComplaintCategory = "Other";
   let categoryScore = 0;
-  const runnerUps: { category: ComplaintCategory; score: number }[] = [];
   for (const rule of CATEGORY_RULES) {
     let score = 0;
     for (const p of rule.patterns) {
       const hits = (text.match(p) ?? []).length;
       if (hits > 0) score += rule.weight * Math.min(hits, 3);
-      if (hits > 0 && rule.weight >= 2 && score > categoryScore) {
-        category = rule.category;
-        categoryScore = score;
-      }
     }
-  }
-  if (categoryScore === 0) {
-    category = urls.length > 0 || emails.length > 0 ? "Other" : "Other";
+    if (score > categoryScore) {
+      category = rule.category;
+      categoryScore = score;
+    }
   }
 
   // 2) sentiment (neg / pos lexicons + punctuation intensity)
-  const neg = countMatches2(lower, NEGATIVE_WORDS);
-  const pos = countMatches2(lower, POSITIVE_WORDS);
+  const neg = countMatches(lower, NEGATIVE_WORDS);
+  const pos = countMatches(lower, POSITIVE_WORDS);
   const exclaim = (text.match(/!/g) ?? []).length;
   const capsWords = (text.match(/\b[A-Z]{3,}\b/g) ?? []).length;
   const negIntensifiers = (lower.match(/\b(very|extremely|so|really|totally|absolutely)\b/g) ?? []).length;
@@ -603,12 +581,11 @@ export function analyzeText(raw: string): AnalysisResult {
     sentimentScore >= 2 ? "Negative" : sentimentScore <= -1.5 ? "Positive" : "Neutral";
 
   // emotion + urgency
-  const emotionRules: { emotion: string; patterns: RegExp[] }[] = finer emotions
   const emotionRules: { emotion: string; patterns: RegExp[] }[] = [
     { emotion: "Anger", patterns: [/\b(furious|angry|outraged|disgusted|unacceptable)\b/i] },
     { emotion: "Frustration", patterns: [/\b(frustrated|frustrating|annoyed|runaround|third time|still)\b/i] },
     { emotion: "Fear / Anxiety", patterns: [/\b(scared|afraid|worried|nervous|anxious|compromised|hacked|stolen)\b/i] },
-    { emotion: "Disappointment", patterns: [/\b(disappointed|disappointed, let me know|disappointed|let down|unhappy|expected better)\b/i] },
+    { emotion: "Disappointment", patterns: [/\b(disappointed|let down|unhappy|expected better)\b/i] },
     { emotion: "Confusion", patterns: [/\b(confused|don'?t understand|why (is|did)|what happened|how come)\b/i] },
     { emotion: "Satisfaction", patterns: [/\b(happy|satisfied|resolved|thank(s| you)|great|excellent)\b/i] },
     { emotion: "Urgency", patterns: [/\b(urgent|asap|immediately|right now|emergency)\b/i] },
@@ -621,7 +598,7 @@ export function analyzeText(raw: string): AnalysisResult {
     }
   }
 
-  const urgentHits = countMatches2(lower, URGENT_WORDS);
+  const urgentHits = countMatches(lower, URGENT_WORDS);
   const compromiseSignals = (lower.match(/\b(compromised|hacked|unauthorized|fraud|stolen|breach)\b/g) ?? []).length;
   let urgency: Priority = "Low";
   if (urgentHits >= 1) urgency = "High";
@@ -649,10 +626,9 @@ export function analyzeText(raw: string): AnalysisResult {
     "too", "very", "s", "t", "can", "will", "just", "don", "should", "now", "i", "me", "my",
     "myself", "we", "our", "ours", "you", "your", "yours", "he", "him", "his", "she", "her",
     "it", "its", "they", "them", "their", "what", "which", "who", "whom", "this", "that",
-    "these", "c", "be", "been", "being", "have", "has", "had", "having", "do", "does", "did",
-    "doing", "would", "could", "ought", "is", "are", "was", "were", "be", "am", "was", "were",
-    "be", "am", "is", "are", "was", "de", "hi", "hello", "regards", "thanks", "please",
-    "would", "could", "should", "may", "might", "must", "shall", "d", "ll", "m", "o", "re",
+    "these", "be", "been", "being", "have", "has", "had", "having", "do", "does", "did",
+    "doing", "would", "could", "ought", "is", "are", "was", "were", "am", "de", "hi", "hello",
+    "regards", "thanks", "please", "may", "might", "must", "shall", "d", "ll", "m", "o", "re",
     "ve", "y", "ain", "aren", "couldn", "didn", "doesn", "hadn", "hasn", "haven", "isn",
     "ma", "mightn", "mustn", "needn", "shan", "shouldn", "wasn", "weren", "won", "wouldn",
   ]);
@@ -675,30 +651,28 @@ export function analyzeText(raw: string): AnalysisResult {
     socialEngineering.push({ technique: TECHNIQUE_LABELS.urgency, reason: "Urgency language pressures the reader to act without verifying" });
     techniques.add("urgency");
   }
-  if (/\b(security team|billing department|it department|bank official|support agent|verify your identity|account manager)\b/i.test(text)) claimedAuthority
   if (/\b(security team|billing department|it department|bank official|verify your identity|account manager)\b/i.test(text)) {
     socialEngineering.push({ technique: TECHNIQUE_LABELS.authority, reason: "Sender claims organizational authority to demand compliance" });
     techniques.add("authority");
   }
   if (/\b(password|passcode|pin|otp|one-time code|one time password|cvv|card number|card details|credit card)\b/i.test(text)) {
-    socialEngineering.push({ technique: "Credential harvesting", reason: "Message references passwords, OTPs or card data" });
+    socialEngineering.push({ technique: TECHNIQUE_LABELS.credentials, reason: "Message references passwords, OTPs or card data" });
     techniques.add("credentials");
   }
-  if (/\b(account (will be|has been|is) (closed|suspended|blocked|terminated)|legal action|sue|court|deactivate|delete your account|data (will be|has been) (deleted|lost))\b/i.test(text)) {
-    socialEngineering.push({ technique: "Fear / threat framing", reason: "Threatens account closure or legal consequences" });
+  if (/\b(account (will be|has been|is) (permanently )?(closed|suspended|blocked|terminated)|legal action|sue|court|deactivate|delete your account|data (will be|has been) (deleted|lost))\b/i.test(text)) {
+    socialEngineering.push({ technique: TECHNIQUE_LABELS.fear, reason: "Threatens account closure or legal consequences" });
     techniques.add("fear");
   }
-  if (/\b(gift card|crypto|bitcoin|wire transfer|western union|transfer (money|funds)|send (money|funds))\b/i.test(gift-card)) {
-    socialEngineering.push({ technique: "Payment redirection", reason: "Asks to move money through hard-to-reverse channels" });
+  if (/\b(gift card|crypto|bitcoin|wire transfer|western union|transfer (money|funds)|send (money|funds))\b/i.test(text)) {
+    socialEngineering.push({ technique: TECHNIQUE_LABELS.redirection, reason: "Asks to move money through hard-to-reverse channels" });
     techniques.add("redirection");
   }
   if (/\b(you have (won|been selected)|exclusive (offer|deal)|limited (time )?offer|claim your (prize|refund|reward)|free (gift|money|iphone))\b/i.test(text)) {
-    socialEngineering.push({ technique: "Too-good-to-be-true", reason: "Unsolicited reward offer is a classic lure" });
+    socialEngineering.push({ technique: TECHNIQUE_LABELS.lure, reason: "Unsolicited reward offer is a classic lure" });
     techniques.add("lure");
   }
 
   const suspiciousUrls = urls.filter((u) => u.risk !== "low");
-  const suspiciousEmails = emails.filter((e) => e.risk !== "low");
   const riskyAttachments = attachments.filter((a) => a.risk !== "low");
   const credentialRequest = /\b(enter|provide|confirm|share|reply with)\b[^.!?]*\b(password|username|pin|otp|card|credentials)\b/i.test(text);
   const otpRequest = /\b(otp|one[- ]time (code|password)|verification code)\b/i.test(text);
@@ -712,7 +686,7 @@ export function analyzeText(raw: string): AnalysisResult {
     riskScore += e.risk === "critical" ? 3.5 : e.risk === "medium" ? 1 : 0;
   }
   for (const a of attachments) {
-    riskScore += a.risk === "critical" .5 : a.risk === "high" ? 3 : a.risk === "medium" ? 1 : 0;
+    riskScore += a.risk === "critical" ? 3.5 : a.risk === "high" ? 3 : a.risk === "medium" ? 1 : 0;
   }
   if (credentialRequest) riskScore += 4;
   if (otpRequest) riskScore += 3;
@@ -723,16 +697,17 @@ export function analyzeText(raw: string): AnalysisResult {
   if (riskScore >= 8) riskLevel = "Critical";
   else if (riskScore >= 4.5) riskLevel = "High";
   else if (riskScore >= 2) riskLevel = "Medium";
+  if (techniques.size > 0 && riskLevel === "Low") riskLevel = "Medium";
 
-  const hasThreat = riskLevel !== "Low";
   const threatTypes: string[] = [];
   if (suspiciousUrls.length > 0) threatTypes.push("Phishing URL");
-  if (lookalikeBrand(urls) || lookalikeBrand(emails)) threatTypes.push("Brand impersonation");
+  if (urls.some((u) => u.lookalikeBrand) || emails.some((e) => e.lookalikeBrand)) threatTypes.push("Brand impersonation");
   if (credentialRequest) threatTypes.push("Credential harvesting");
   if (otpRequest) threatTypes.push("OTP request");
   if (techniques.has("redirection")) threatTypes.push("Payment redirection");
   if (riskyAttachments.length > 0) threatTypes.push("Malicious attachment");
-  if (techniques.size > 0 && riskLevel === "Low") riskLevel = "Medium";
+
+  const hasThreat = riskLevel !== "Low";
 
   // 7) summary
   const firstSentence = text.split(/(?<=[.!?])\s+/)[0]?.trim() ?? text.slice(0, 140);
@@ -746,7 +721,7 @@ export function analyzeText(raw: string): AnalysisResult {
   let customerRequest = "Explicit request not stated — infer from issue";
   for (const p of requestPatterns) {
     const m = text.match(p);
-    please = m?.[1]?.trim();
+    const request = m?.[1]?.trim();
     if (request) {
       customerRequest = request.length > 120 ? `${request.slice(0, 117)}…` : request;
       break;
@@ -758,11 +733,11 @@ export function analyzeText(raw: string): AnalysisResult {
   const currentStatus = resolutionStatus === "Unresolved" ? "Awaiting resolution" : resolutionStatus === "Resolved" ? "Reported resolved" : "Needs review";
 
   const priority: Priority =
-    urgency === "Critical" || riskLevel === "Critical" || (compromiseSignals >= 1)
+    urgency === "Critical" || riskLevel === "Critical" || compromiseSignals >= 1
       ? "Critical"
       : urgency === "High" || riskLevel === "High" || (moneyMentioned && sentimentLabel === "Negative")
         ? "High"
-        : urgency === "Medium" || riskLevel === "Medium" ? "Medium" : "Low";
+        : riskLevel === "Medium" ? "Medium" : "Low";
 
   const recommendedAction = buildRecommendation(riskLevel, techniques, suspiciousUrls.length > 0, credentialRequest, otpRequest);
 
@@ -788,7 +763,7 @@ export function analyzeText(raw: string): AnalysisResult {
       emails,
       attachments,
       credentialRequest,
-      status otpRequest,
+      otpRequest,
       moneyMentioned,
       currencyAmounts: amounts,
       recommendedAction,
@@ -822,7 +797,7 @@ function buildRecommendation(
   return "No security action required. Route by category and sentiment to the right queue.";
 }
 
-export const SAMPLE_EMAILS: { label: string; text: "string" }[] = [
+export const SAMPLE_EMAILS: { label: string; text: string }[] = [
   {
     label: "Phishing: urgency + lookalike URL",
     text: `URGENT! Your account has been compromised. Click this link immediately to secure your account and enter your username, password and OTP.
