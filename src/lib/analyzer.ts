@@ -55,6 +55,8 @@ export interface UrlFinding {
   lookalikeBrand: string | null;
   lookalikeChars: string[];
   hasCredentialsInUrl: boolean;
+  /** redirect chain embedded in the URL (open-redirect params, @-tricks, multi-protocol) */
+  redirectHints: string[];
   flags: string[];
   risk: "low" | "medium" | "high" | "critical";
 }
@@ -307,6 +309,26 @@ export function parseUrl(raw: string): UrlFinding {
   let risk: UrlFinding["risk"] = "low";
 
   const hasUserinfo = /\/\/[^/@]*@/.test(url);
+  // redirect hints: open-redirect params, double protocol, embedded second URL
+  const redirectHints: string[] = [];
+  const openRedirect = path.match(/[?&](?:url|next|redirect|redirect_url|return|returnUrl|continue|target|dest|destination|goto)=([^&\s]+)/i);
+  if (openRedirect) {
+    redirectHints.push(`Redirect parameter "${openRedirect[1].slice(0, 60)}" — possible open-redirect abuse`);
+  }
+  if ((url.match(/https?:\/\//gi) ?? []).length > 1) {
+    redirectHints.push("Multiple protocols embedded — URL may hop to another host");
+  }
+  if (openRedirect) {
+    try {
+      const inner = decodeURIComponent(openRedirect[1]);
+      const innerHost = inner.match(/^https?:\/\/([^/]+)/i)?.[1];
+      if (innerHost && innerHost.toLowerCase() !== host) {
+        redirectHints.push(`Redirects onward to "${innerHost}" — destination differs from the visible domain`);
+      }
+    } catch {
+      // malformed encoding — the open-redirect flag above already stands
+    }
+  }
   const isPunycode = host.includes("xn--");
 
   if (!https) flags.push("No HTTPS — traffic is unencrypted");
@@ -355,9 +377,11 @@ export function parseUrl(raw: string): UrlFinding {
       for (const [brand] of BRANDS) {
         const b = brand.replace(/\s/g, "");
         const maxDist = b.length >= 6 ? 2 : 1;
+        const dist = levenshtein(label, b);
         if (
-          Math.abs(label.length - b.length) <= maxDist &&
-          levenshtein(label, b) <= maxDist
+          dist >= 1 &&
+          dist <= maxDist &&
+          Math.abs(label.length - b.length) <= maxDist
         ) {
           lookalikeBrand = brand;
           lookalikeChars = [];
@@ -377,6 +401,10 @@ export function parseUrl(raw: string): UrlFinding {
   if (SHORTENERS.has(registrableDomain) && risk === "low") risk = "medium";
   if (SUSPICIOUS_TLDS.has(tld) && risk === "low") risk = "medium";
   if (suspChars.length >= 2 && risk === "low") risk = "medium";
+  if (redirectHints.length > 0 && risk === "low") risk = "medium";
+  if (redirectHints.length > 0) {
+    flags.push(...redirectHints);
+  }
 
   return {
     url,
@@ -391,6 +419,7 @@ export function parseUrl(raw: string): UrlFinding {
     lookalikeBrand,
     lookalikeChars,
     hasCredentialsInUrl: /\/\/[^/?#]*[?&](?:user|username|pass|password|token|otp|email)=/i.test(path),
+    redirectHints,
     flags,
     risk,
   };
@@ -450,9 +479,11 @@ export function parseEmail(raw: string): EmailFinding {
       for (const [brand] of BRANDS) {
         const b = brand.replace(/\s/g, "");
         const maxDist = b.length >= 6 ? 2 : 1;
+        const dist = levenshtein(label, b);
         if (
-          Math.abs(label.length - b.length) <= maxDist &&
-          levenshtein(label, b) <= maxDist
+          dist >= 1 &&
+          dist <= maxDist &&
+          Math.abs(label.length - b.length) <= maxDist
         ) {
           lookalikeBrand = brand;
           lookalikeChars = [];

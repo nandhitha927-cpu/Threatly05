@@ -608,14 +608,79 @@ export default function Dashboard() {
                       <p className="text-sm text-muted-foreground">No URLs found in this message.</p>
                     ) : (
                       result.security.urls.map((u) => (
-                        <FindingRow
-                          key={u.url}
-                          icon={Link2}
-                          title={u.url}
-                          sub={`Domain: ${u.registrableDomain}${u.lookalikeBrand ? ` · impersonates ${u.lookalikeBrand}` : ""}`}
-                          risk={u.risk}
-                          flags={u.flags}
-                        />
+                        <div key={u.url} className="rounded-xl border border-border/70 p-3.5">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex min-w-0 items-start gap-3">
+                              <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground/80">
+                                <Link2 className="size-4" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="break-all text-sm font-medium text-foreground">{u.url}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  Domain: {u.registrableDomain}
+                                  {u.lookalikeBrand ? ` · impersonates ${u.lookalikeBrand}` : ""}
+                                </p>
+                              </div>
+                            </div>
+                            <Badge className={`shrink-0 border font-semibold shadow-none ${riskStyles[u.risk] ?? riskStyles.Low}`}>
+                              {u.risk}
+                            </Badge>
+                          </div>
+                          <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs sm:grid-cols-3">
+                            <div>
+                              <span className="text-muted-foreground">Subdomain: </span>
+                              <span className="font-mono">{u.subdomain || "—"}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Length: </span>
+                              <span className="font-mono">{u.urlLength} chars</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">HTTPS: </span>
+                              <span className={u.https ? "text-emerald-700" : "font-semibold text-red-700"}>
+                                {u.https ? "Yes" : "No"}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">IP host: </span>
+                              <span className={u.isIpHost ? "font-semibold text-red-700" : "font-mono"}>
+                                {u.isIpHost ? "Yes" : "No"}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Shortener: </span>
+                              <span className={u.isShortener ? "font-semibold text-orange-700" : "font-mono"}>
+                                {u.isShortener ? "Yes" : "No"}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Creds in URL: </span>
+                              <span className={u.hasCredentialsInUrl ? "font-semibold text-red-700" : "font-mono"}>
+                                {u.hasCredentialsInUrl ? "Yes" : "No"}
+                              </span>
+                            </div>
+                            <div className="col-span-2 sm:col-span-3">
+                              <span className="text-muted-foreground">Redirects: </span>
+                              {u.redirectHints.length > 0 ? (
+                                <span className="font-semibold text-orange-700">{u.redirectHints.length} hint(s)</span>
+                              ) : (
+                                <span className="font-mono">none detected</span>
+                              )}
+                            </div>
+                          </div>
+                          {u.suspiciousChars.length > 0 && (
+                            <p className="mt-2 text-xs text-muted-foreground">
+                              Suspicious characters: <span className="font-mono">{u.suspiciousChars.join(" ")}</span>
+                            </p>
+                          )}
+                          {u.flags.length > 0 && (
+                            <ul className="mt-2 list-inside list-disc text-xs text-muted-foreground">
+                              {u.flags.map((f) => (
+                                <li key={f}>{f}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
                       ))
                     )}
                   </TabsContent>
