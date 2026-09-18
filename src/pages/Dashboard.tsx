@@ -17,6 +17,7 @@ import {
   Inbox,
   TrendingUp,
   Layers,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -50,6 +51,8 @@ import {
 } from "@/lib/analyzer";
 import { generateSampleCorpus } from "@/lib/sample-corpus";
 import { buildCombinedIntel } from "@/lib/combined-intel";
+import { conversationId } from "@/lib/analytics";
+import AnalyticsView from "@/pages/AnalyticsView";
 
 /** Spec §6 demo: a long 24-message support thread. */
 const DEMO_THREAD = `Customer: Hi, I was charged twice for my order #88213 this month. The amount ₹1,299 was deducted two times.
@@ -201,6 +204,7 @@ export default function Dashboard() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [history, setHistory] = useState<AnalysisResult[]>([]);
   const [batch, setBatch] = useState<AnalysisResult[] | null>(null);
+  const [view, setView] = useState<"console" | "analytics">("console");
 
   const analyze = () => {
     if (!input.trim()) return;
@@ -269,19 +273,47 @@ export default function Dashboard() {
               </p>
             </div>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            className="glass-chip gap-2 border-white/70"
-            onClick={handleSignOut}
-          >
-            <LogOut className="size-4" />
-            Sign out
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg border border-border/70 bg-background/50 p-0.5">
+              <Button
+                type="button"
+                size="sm"
+                variant={view === "console" ? "default" : "ghost"}
+                className="h-8 gap-1.5 rounded-md"
+                onClick={() => setView("console")}
+              >
+                <ScanSearch className="size-3.5" />
+                Console
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={view === "analytics" ? "default" : "ghost"}
+                className="h-8 gap-1.5 rounded-md"
+                onClick={() => setView("analytics")}
+              >
+                <TrendingUp className="size-3.5" />
+                Analytics
+              </Button>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="glass-chip gap-2 border-white/70"
+              onClick={handleSignOut}
+            >
+              <LogOut className="size-4" />
+              Sign out
+            </Button>
+          </div>
         </div>
       </header>
 
       <main className="relative z-10 mx-auto w-full max-w-6xl px-6 py-8">
+        {view === "analytics" ? (
+          <AnalyticsView corpus={corpus} />
+        ) : (
+          <>
         {/* Input */}
         <Card className="glass-panel-strong border-white/80 shadow-none">
           <CardHeader>
@@ -916,6 +948,87 @@ export default function Dashboard() {
                 </Tabs>
               </CardContent>
             </Card>
+
+            {/* Spec §10: structured result card in expected-output format */}
+            <Card className="glass-panel border-white/70 shadow-none">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+                  <FileText className="size-4 text-blue-600" />
+                  Structured result
+                </CardTitle>
+                <CardDescription>
+                  Machine-readable card in the spec's expected-output format.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-xl border bg-white/60 p-4 font-mono text-xs leading-relaxed text-foreground/90">
+                  <div className="grid gap-1.5">
+                    <p>
+                      <span className="text-muted-foreground">Conversation ID:</span>{" "}
+                      <span className="font-semibold">{conversationId(result)}</span>
+                    </p>
+                    <p>
+                      <span className="text-muted-foreground">Customer Issue:</span> {result.summary.issue}
+                    </p>
+                    <p>
+                      <span className="text-muted-foreground">Category:</span> {result.complaint.category}
+                    </p>
+                    <p>
+                      <span className="text-muted-foreground">Sentiment:</span> {result.sentiment.label}
+                      <span className="text-muted-foreground"> · Emotion:</span> {result.sentiment.emotion}
+                      <span className="text-muted-foreground"> · Urgency:</span> {result.sentiment.urgency}
+                    </p>
+                    <p>
+                      <span className="text-muted-foreground">Priority:</span>{" "}
+                      <span className="font-semibold">{result.complaint.priority}</span>
+                    </p>
+                    <p>
+                      <span className="text-muted-foreground">Resolution Status:</span> {result.resolution.status}
+                    </p>
+                    {convSummary && (
+                      <p>
+                        <span className="text-muted-foreground">Summary:</span> {convSummary.customerRequest}
+                      </p>
+                    )}
+                    <div className="my-1 border-t border-dashed" />
+                    <p>
+                      <span className="text-muted-foreground">Security Analysis:</span>{" "}
+                      <span className={result.security.hasThreat ? "font-semibold text-red-600" : "font-semibold text-emerald-600"}>
+                        {result.security.hasThreat ? "Potential Threat Detected" : "No Threat Detected"}
+                      </span>
+                    </p>
+                    {result.security.hasThreat && (
+                      <>
+                        <p>
+                          <span className="text-muted-foreground">Threat Type:</span> {result.security.threatTypes.join(", ") || "—"}
+                        </p>
+                        {result.security.urls.length > 0 && (
+                          <p>
+                            <span className="text-muted-foreground">Suspicious URL:</span> Detected ({result.security.urls.length})
+                          </p>
+                        )}
+                        {result.security.emails.length > 0 && (
+                          <p>
+                            <span className="text-muted-foreground">Suspicious Domain:</span> Detected ({result.security.emails.length} sender flag)
+                          </p>
+                        )}
+                        <p>
+                          <span className="text-muted-foreground">Social Engineering:</span>{" "}
+                          {result.security.socialEngineering.length > 0 ? `Possible (${result.security.socialEngineering[0].technique})` : "No"}
+                        </p>
+                        <p>
+                          <span className="text-muted-foreground">Risk Level:</span>{" "}
+                          <span className="font-semibold">{result.security.riskLevel}</span>
+                        </p>
+                      </>
+                    )}
+                    <p className="mt-1">
+                      <span className="text-muted-foreground">Recommended Action:</span> {combined?.recommendedAction ?? result.summary.actionsTaken}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </motion.div>
         )}
 
@@ -1029,6 +1142,8 @@ export default function Dashboard() {
               </Table>
             </CardContent>
           </Card>
+        )}
+          </>
         )}
       </main>
     </div>
