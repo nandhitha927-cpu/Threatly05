@@ -1142,8 +1142,62 @@ const URGENT_RULES: { reason: string; pattern: RegExp; action: string }[] = [
   },
 ];
 
+/**
+ * Spec mandatory req #2 — text preprocessing pipeline.
+ * Cleaning: trim, collapse whitespace, strip control chars, normalize
+ * unicode punctuation. Tokenization happens downstream via tokenize().
+ */
+export function preprocess(raw: string): string {
+  return raw
+    .replace(/\r\n?/g, "\n") // normalize line endings
+    .replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, " ") // control chars except \n (0x0A)
+    .replace(/[\u2018\u2019]/g, "'") // curly quotes → ascii
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/\u00A0/g, " ") // nbsp
+    .replace(/[^\S\n]+/g, " ") // collapse horizontal whitespace
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
+ * Spec mandatory req #2 — tokenization: lowercase, strip punctuation,
+ * drop stopwords, simple suffix stemming. Used for keyword extraction
+ * and available standalone for the NLP pipeline.
+ */
+export function tokenize(raw: string): string[] {
+  const STOPWORDS = new Set([
+    "the", "a", "an", "and", "or", "but", "if", "then", "else", "when", "at", "by", "for",
+    "with", "about", "against", "between", "into", "through", "during", "before", "after",
+    "above", "below", "to", "from", "up", "down", "in", "out", "on", "off", "over", "under",
+    "again", "further", "once", "here", "there", "all", "any", "both", "each", "few", "more",
+    "most", "other", "some", "such", "no", "nor", "not", "only", "own", "same", "so", "than",
+    "too", "very", "s", "t", "can", "will", "just", "don", "should", "now", "i", "me", "my",
+    "myself", "we", "our", "ours", "you", "your", "yours", "he", "him", "his", "she", "her",
+    "it", "its", "they", "them", "their", "what", "which", "who", "whom", "this", "that",
+    "these", "be", "been", "being", "have", "has", "had", "having", "do", "does", "did",
+    "doing", "would", "could", "ought", "is", "are", "was", "were", "am", "de", "hi", "hello",
+    "regards", "thanks", "please", "may", "might", "must", "shall", "d", "ll", "m", "o", "re",
+    "ve", "y", "ain", "aren", "couldn", "didn", "doesn", "hadn", "hasn", "haven", "isn",
+    "ma", "mightn", "mustn", "needn", "shan", "shouldn", "wasn", "weren", "won", "wouldn",
+  ]);
+  return preprocess(raw)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s'-]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !STOPWORDS.has(w))
+    .map((w) => {
+      if (w.length > 4 && w.endsWith("ing")) return w.slice(0, -3);
+      if (w.length > 4 && w.endsWith("es")) return w.slice(0, -2);
+      if (w.length > 3 && w.endsWith("ed")) return w.slice(0, -2);
+      if (w.length > 3 && w.endsWith("s") && !w.endsWith("ss")) return w.slice(0, -1);
+      return w;
+    })
+    .filter((w) => w.length > 2);
+}
+
 export function analyzeText(raw: string, options?: { expectedDomain?: string }): AnalysisResult {
-  const text = raw.trim();
+  const text = preprocess(raw);
   const lower = text.toLowerCase();
 
   // URLs / emails / money / attachments
@@ -1215,8 +1269,19 @@ export function analyzeText(raw: string, options?: { expectedDomain?: string }):
   const capsWords = (text.match(/\b[A-Z]{3,}\b/g) ?? []).length;
   const negIntensifiers = (lower.match(/\b(very|extremely|so|really|totally|absolutely)\b/g) ?? []).length;
   const sentimentScore = neg * 2 + exclaim * 0.5 + capsWords * 0.5 + negIntensifiers - pos * 1.5;
+  // positive-leaning guard: multiple distinct positive cues override a weakly-negative raw score
+  const positiveCues =
+    (lower.match(/\b(thank(s| you)|great|excellent|wonderful|awesome|amazing|fantastic|perfect|happy|pleased|satisfied|appreciate|helpful|resolved|solved|fixed|smooth)\b/g) ?? []).length;
+  const distinctPos = new Set(
+    (lower.match(/\b(thank|thanks|thank you|great|excellent|wonderful|awesome|amazing|fantastic|perfect|happy|pleased|satisfied|appreciate|helpful|resolved|solved|fixed|smooth)\b/g) ?? []).map((w) => w),
+  ).size;
+  const negativeCues = neg;
   const sentimentLabel: Sentiment =
-    sentimentScore >= 2 ? "Negative" : sentimentScore <= -1.5 ? "Positive" : "Neutral";
+    sentimentScore >= 2 && !(positiveCues >= 2 && positiveCues >= negativeCues)
+      ? "Negative"
+      : sentimentScore <= -1.5 || (positiveCues >= 2 && positiveCues > negativeCues && distinctPos >= 2)
+        ? "Positive"
+        : "Neutral";
 
   // emotion + urgency
   const emotionRules: { emotion: string; patterns: RegExp[] }[] = [
@@ -1333,7 +1398,7 @@ export function analyzeText(raw: string, options?: { expectedDomain?: string }):
     socialEngineering.push({ technique: TECHNIQUE_LABELS.urgency, reason: "Urgency language pressures the reader to act without verifying" });
     techniques.add("urgency");
   }
-  if (/\b(security team|billing department|it department|bank official|verify your identity|account manager)\b/i.test(text)) {
+  if (/\b(security team|billing department|it department|bank official|verify your identity|account manager|security director|it director|security officer|compliance officer|system administrator|it admin)\b/i.test(text)) {
     socialEngineering.push({ technique: TECHNIQUE_LABELS.authority, reason: "Sender claims organizational authority to demand compliance" });
     techniques.add("authority");
   }
