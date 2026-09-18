@@ -2,6 +2,10 @@
  * InsightGuard — rule-based intelligence engine (v1).
  * Extracted intelligence model shared by the UI and the Convex action.
  */
+import { detectLanguage, LANG_LABELS, LEXICONS, type SupportedLang } from "./languages";
+
+export type { SupportedLang } from "./languages";
+export { LANG_LABELS, detectLanguage } from "./languages";
 
 export const COMPLAINT_CATEGORIES = [
   "Payment / Transaction",
@@ -17,6 +21,20 @@ export const COMPLAINT_CATEGORIES = [
   "Other",
 ] as const;
 export type ComplaintCategory = (typeof COMPLAINT_CATEGORIES)[number];
+
+/** Maps engine categories to the multilingual lexicon keys (languages.ts). */
+const CATEGORY_TO_KEY: Partial<Record<ComplaintCategory, keyof NonNullable<import("./languages").LangLexicon["categories"]>>> = {
+  "Refund Request": "refund",
+  "Billing Problem": "billing",
+  "Payment / Transaction": "payment",
+  "Account / Login": "account",
+  "Product Issue": "product",
+  "Delivery / Shipping": "delivery",
+  "Subscription Issue": "subscription",
+  "Technical Problem": "technical",
+  "Service Quality": "service",
+  "Security Concern": "security",
+};
 
 export type Priority = "Low" | "Medium" | "High" | "Critical";
 export type Sentiment = "Positive" | "Neutral" | "Negative";
@@ -40,6 +58,13 @@ export const TECHNIQUE_LABELS: Record<string, string> = {
   fear: "Fear / threat framing",
   redirection: "Payment redirection",
   lure: "Too-good-to-be-true",
+};
+
+/** reason lines reused by the multilingual detection blocks */
+const TECHNIQUE_REASONS: Record<string, string> = {
+  fear: "Threatens account closure or legal consequences",
+  redirection: "Asks to move money through hard-to-reverse channels",
+  lure: "Unsolicited reward offer is a classic lure",
 };
 
 export interface UrlFinding {
@@ -180,7 +205,7 @@ export interface AnalysisResult {
   receivedAt: string;
   textLength: number;
   wordCount: number;
-  language: "en";
+  language: SupportedLang;
   complaint: {
     category: ComplaintCategory;
     categoryScore: number;
@@ -791,26 +816,42 @@ const URGENT_WORDS = [
  */
 export function splitConversation(raw: string): ConversationTurn[] {
   const lines = raw.split(/\r?\n/);
-  const labeled = lines.some((l) => /^(customer|support|agent|user|client|representative|rep|bot|kunde|kunden)\s*:/i.test(l.trim()));
+  // collect turn labels across all supported languages (EN + lexicon turnLabels)
+  const allLabels: { label: RegExp; role: TurnRole }[] = [
+    { label: /^(customer|user|client|kunde|kunden)$/, role: "customer" },
+    { label: /^(support|agent|representative|rep|bot)$/, role: "support" },
+  ];
+  for (const lex of Object.values(LEXICONS)) {
+    allLabels.push({ label: lex.turnLabels.customer, role: "customer" });
+    allLabels.push({ label: lex.turnLabels.support, role: "support" });
+  }
+  const labelRole = (s: string): TurnRole | null => {
+    for (const { label, role } of allLabels) {
+      if (label.test(s)) return role;
+    }
+    return null;
+  };
+  /** "Cliente: ..." → { role, text } using the multilingual label set */
+  const matchLabel = (line: string): { role: TurnRole; text: string } | null => {
+    const m = line.match(/^([^:\s][^:]{0,30}?)\s*:\s*(.*)$/);
+    if (!m) return null;
+    const role = labelRole(m[1].trim());
+    if (!role) return null;
+    return { role, text: m[2] };
+  };
+  const labeled = lines.some((l) => matchLabel(l.trim()) !== null);
   if (labeled) {
     const turns: ConversationTurn[] = [];
     let cur: ConversationTurn | null = null;
     for (const line of lines) {
-      const m = line.trim().match(/^(customer|support|agent|user|user|client|representative|rep|bot|kunde)\s*:\s*(.*)$/i);
+      const m = matchLabel(line.trim());
       if (m) {
-        const roleRaw = m[1].toLowerCase();
-        const role: TurnRole =
-          /^(customer|user|client|kunde)$/.test(roleRaw)
-            ? "customer"
-            : /^(support|agent|representative|rep|bot)$/.test(roleRaw)
-              ? "support"
-              : "unknown";
         if (cur) turns.push(cur);
-        cur = { role, text: m[2] };
+        cur = { role: m.role, text: m.text };
       } else if (cur) {
         cur.text += ` ${line.trim()}`;
       }
-  }
+    }
     if (cur) turns.push(cur);
     return turns.filter((t) => t.text.trim().length > 0);
   }
@@ -1199,6 +1240,17 @@ export function tokenize(raw: string): string[] {
 export function analyzeText(raw: string, options?: { expectedDomain?: string }): AnalysisResult {
   const text = preprocess(raw);
   const lower = text.toLowerCase();
+  const lang: SupportedLang = detectLanguage(text);
+  const lex = LEXICONS[lang];
+  const lexRxs = [
+    ...Object.values(lex.categories).flat(),
+    ...lex.negative,
+    ...lex.positive,
+    ...lex.urgent,
+    ...Object.values(lex.emotions).flat(),
+  ].filter((w): w is string => typeof w === "string");
+  /** true if any non-EN lexicon keyword for `lang` occurs in the text */
+  const lexHit = (w: string) => lexRxs.some((k) => k.length > 2 && lower.includes(k.toLowerCase())) || lexRxs.includes(w.toLowerCase());
 
   // URLs / emails / money / attachments
   const urls = uniq(text.match(URL_RE) ?? []).map((m) => parseUrl(m));
@@ -1224,6 +1276,16 @@ export function analyzeText(raw: string, options?: { expectedDomain?: string }):
     for (const p of rule.patterns) {
       const hits = (text.match(p) ?? []).length;
       if (hits > 0) score += rule.weight * Math.min(hits, 3);
+    }
+    // multilingual: score the language's keyword lists for the same category
+    if (lang !== "en") {
+      const catKey = CATEGORY_TO_KEY[rule.category];
+      const words = catKey ? lex.categories[catKey] : undefined;
+      if (words) {
+        for (const w of words) {
+          if (lower.includes(w.toLowerCase())) score += rule.weight * 2;
+        }
+      }
     }
     if (score > categoryScore) {
       category = rule.category;
@@ -1263,12 +1325,13 @@ export function analyzeText(raw: string, options?: { expectedDomain?: string }):
   }
 
   // 2) sentiment (neg / pos lexicons + punctuation intensity)
-  const neg = countMatches(lower, NEGATIVE_WORDS);
-  const pos = countMatches(lower, POSITIVE_WORDS);
+  const neg = countMatches(lower, NEGATIVE_WORDS) + (lang !== "en" ? lex.negative.filter((w) => lower.includes(w.toLowerCase())).length : 0);
+  const pos = countMatches(lower, POSITIVE_WORDS) + (lang !== "en" ? lex.positive.filter((w) => lower.includes(w.toLowerCase())).length : 0);
   const exclaim = (text.match(/!/g) ?? []).length;
   const capsWords = (text.match(/\b[A-Z]{3,}\b/g) ?? []).length;
   const negIntensifiers = (lower.match(/\b(very|extremely|so|really|totally|absolutely)\b/g) ?? []).length;
-  const sentimentScore = neg * 2 + exclaim * 0.5 + capsWords * 0.5 + negIntensifiers - pos * 1.5;
+  const mlPos = lang !== "en" ? lex.positive.filter((w) => lower.includes(w.toLowerCase())).length : 0;
+  const sentimentScore = neg * 2 + exclaim * 0.5 + capsWords * 0.5 + negIntensifiers - pos * 1.5 - mlPos * 1.5;
   // positive-leaning guard: multiple distinct positive cues override a weakly-negative raw score
   const positiveCues =
     (lower.match(/\b(thank(s| you)|great|excellent|wonderful|awesome|amazing|fantastic|perfect|happy|pleased|satisfied|appreciate|helpful|resolved|solved|fixed|smooth)\b/g) ?? []).length;
@@ -1276,10 +1339,11 @@ export function analyzeText(raw: string, options?: { expectedDomain?: string }):
     (lower.match(/\b(thank|thanks|thank you|great|excellent|wonderful|awesome|amazing|fantastic|perfect|happy|pleased|satisfied|appreciate|helpful|resolved|solved|fixed|smooth)\b/g) ?? []).map((w) => w),
   ).size;
   const negativeCues = neg;
+  const positiveCuesTotal = positiveCues + mlPos;
   const sentimentLabel: Sentiment =
-    sentimentScore >= 2 && !(positiveCues >= 2 && positiveCues >= negativeCues)
+    sentimentScore >= 2 && !(positiveCuesTotal >= 2 && positiveCuesTotal >= negativeCues)
       ? "Negative"
-      : sentimentScore <= -1.5 || (positiveCues >= 2 && positiveCues > negativeCues && distinctPos >= 2)
+      : sentimentScore <= -1.5 || (positiveCuesTotal >= 2 && positiveCuesTotal > negativeCues && distinctPos + mlPos >= 2)
         ? "Positive"
         : "Neutral";
 
@@ -1300,9 +1364,31 @@ export function analyzeText(raw: string, options?: { expectedDomain?: string }):
       break;
     }
   }
+  // multilingual emotions (checked after EN so shared romanizations don't shadow)
+  if (emotion === "Neutral" && lang !== "en") {
+    const emotionMap: [string, string[]][] = [
+      ["Anger", lex.emotions.anger ?? []],
+      ["Frustration", lex.emotions.frustration ?? []],
+      ["Fear / Anxiety", lex.emotions.fear ?? []],
+      ["Satisfaction", lex.emotions.satisfaction ?? []],
+      ["Urgency", lex.emotions.urgency ?? []],
+    ];
+    for (const [emo, words] of emotionMap) {
+      if (words.some((w) => lower.includes(w.toLowerCase()))) {
+        emotion = emo;
+        break;
+      }
+    }
+  }
 
-  const urgentHits = countMatches(lower, URGENT_WORDS);
-  const compromiseSignals = (lower.match(/\b(compromised|hacked|unauthorized|fraud|stolen|breach)\b/g) ?? []).length;
+  const urgentHits =
+    countMatches(lower, URGENT_WORDS) +
+    (lang !== "en" ? lex.urgent.filter((w) => lower.includes(w.toLowerCase())).length : 0);
+  const compromiseSignals =
+    (lower.match(/\b(compromised|hacked|unauthorized|fraud|stolen|breach)\b/g) ?? []).length +
+    (lang !== "en"
+      ? (lex.categories.security ?? []).filter((w) => lower.includes(w.toLowerCase())).length
+      : 0);
   // repeated contact attempts ("three times", "multiple tickets") and being ignored
   // ("nobody has solved", "no response", "still not resolved") are urgency signals
   const repeatContactHits =
@@ -1327,10 +1413,18 @@ export function analyzeText(raw: string, options?: { expectedDomain?: string }):
   // 3) resolution status
   const resolvedHits = RESOLVED_MARKERS.filter((m) => new RegExp(`\\b${escapeRegExp(m)}\\b`, "i").test(text));
   const unresolvedHits = UNRESOLVED_MARKERS.filter((m) => new RegExp(`\\b${escapeRegExp(m)}\\b`, "i").test(text));
+  const mlResolved = lang !== "en" ? lex.resolved.filter((p) => p.test(text)) : [];
+  const mlUnresolved = lang !== "en" ? lex.unresolved.filter((p) => p.test(text)) : [];
+  const mlPromises = lang !== "en" ? lex.promise.filter((p) => p.test(text)) : [];
   const resolutionSignals = [
     ...resolvedHits.map((m) => `Resolved marker: "${m}"`),
     ...unresolvedHits.map((m) => `Open-issue marker: "${m}"`),
+    ...mlResolved.map(() => `Resolved marker (${LANG_LABELS[lang]} wording)`),
+    ...mlUnresolved.map(() => `Open-issue marker (${LANG_LABELS[lang]} wording)`),
   ];
+  const mlHasResolved = mlResolved.length > 0;
+  const mlHasUnresolved = mlUnresolved.length > 0;
+  const mlHasPromise = mlPromises.length > 0;
 
   // 3b) conversation-aware resolution (spec §5): analyze turn by turn
   const turns = splitConversation(text);
@@ -1351,11 +1445,13 @@ export function analyzeText(raw: string, options?: { expectedDomain?: string }):
       ? "Unresolved"
       : lastTurn?.status === "Resolved" || anyResolved
         ? "Resolved"
-        : unresolvedHits.length > resolvedHits.length
+        : unresolvedHits.length > resolvedHits.length || (mlHasUnresolved && !mlHasResolved)
           ? "Unresolved"
-          : resolvedHits.length > 0
+          : resolvedHits.length > 0 || (mlHasResolved && !mlHasUnresolved)
             ? "Resolved"
-            : "Unclear";
+            : mlHasPromise && mlHasUnresolved
+              ? "Unresolved"
+              : "Unclear";
   const followUp = {
     needsFollowUp: resolutionStatus !== "Resolved",
     lastSpeaker: lastTurn?.role ?? ("customer" as TurnRole),
@@ -1394,11 +1490,24 @@ export function analyzeText(raw: string, options?: { expectedDomain?: string }):
   // 5) threat detection
   const socialEngineering: { technique: string; reason: string }[] = [];
   const techniques = new Set<string>();
+  /** multilingual SE pattern match helper */
+  const mlSe = (key: "urgency" | "authority" | "credentials" | "fear" | "redirection" | "lure") =>
+    lex.se[key]?.some((p) => p.test(text)) ?? false;
   if (/\b(urgent|immediately|right now|asap|act now|within \d+ (hours|minutes)|expire[sd]?|final (warning|notice))\b/i.test(text)) {
     socialEngineering.push({ technique: TECHNIQUE_LABELS.urgency, reason: "Urgency language pressures the reader to act without verifying" });
     techniques.add("urgency");
   }
+  if (techniques.size === 0 || !techniques.has("urgency")) {
+    if (mlSe("urgency")) {
+      socialEngineering.push({ technique: TECHNIQUE_LABELS.urgency, reason: "Urgency language pressures the reader to act without verifying" });
+      techniques.add("urgency");
+    }
+  }
   if (/\b(security team|billing department|it department|bank official|verify your identity|account manager|security director|it director|security officer|compliance officer|system administrator|it admin)\b/i.test(text)) {
+    socialEngineering.push({ technique: TECHNIQUE_LABELS.authority, reason: "Sender claims organizational authority to demand compliance" });
+    techniques.add("authority");
+  }
+  if (!techniques.has("authority") && mlSe("authority")) {
     socialEngineering.push({ technique: TECHNIQUE_LABELS.authority, reason: "Sender claims organizational authority to demand compliance" });
     techniques.add("authority");
   }
@@ -1406,16 +1515,32 @@ export function analyzeText(raw: string, options?: { expectedDomain?: string }):
     socialEngineering.push({ technique: TECHNIQUE_LABELS.credentials, reason: "Message references passwords, OTPs or card data" });
     techniques.add("credentials");
   }
+  if (!techniques.has("credentials") && mlSe("credentials")) {
+    socialEngineering.push({ technique: TECHNIQUE_LABELS.credentials, reason: "Message references passwords, OTPs or card data" });
+    techniques.add("credentials");
+  }
   if (/\b(account (will be|has been|is) (permanently )?(closed|suspended|blocked|terminated)|legal action|sue|court|deactivate|delete your account|data (will be|has been) (deleted|lost))\b/i.test(text)) {
     socialEngineering.push({ technique: TECHNIQUE_LABELS.fear, reason: "Threatens account closure or legal consequences" });
+    techniques.add("fear");
+  }
+  if (!techniques.has("fear") && mlSe("fear")) {
+    socialEngineering.push({ technique: TECHNIQUE_LABELS.fear, reason: TECHNIQUE_REASONS.fear });
     techniques.add("fear");
   }
   if (/\b(gift card|crypto|bitcoin|wire transfer|western union|transfer (money|funds)|send (money|funds))\b/i.test(text)) {
     socialEngineering.push({ technique: TECHNIQUE_LABELS.redirection, reason: "Asks to move money through hard-to-reverse channels" });
     techniques.add("redirection");
   }
+  if (!techniques.has("redirection") && mlSe("redirection")) {
+    socialEngineering.push({ technique: TECHNIQUE_LABELS.redirection, reason: TECHNIQUE_REASONS.redirection });
+    techniques.add("redirection");
+  }
   if (/\b(you have (won|been selected)|exclusive (offer|deal)|limited (time )?offer|claim your (prize|refund|reward)|free (gift|money|iphone))\b/i.test(text)) {
     socialEngineering.push({ technique: TECHNIQUE_LABELS.lure, reason: "Unsolicited reward offer is a classic lure" });
+    techniques.add("lure");
+  }
+  if (!techniques.has("lure") && mlSe("lure")) {
+    socialEngineering.push({ technique: TECHNIQUE_LABELS.lure, reason: TECHNIQUE_REASONS.lure });
     techniques.add("lure");
   }
 
@@ -1425,12 +1550,21 @@ export function analyzeText(raw: string, options?: { expectedDomain?: string }):
     if (!phishingSignals.some((s) => s.signal === signal))
       phishingSignals.push({ signal, detail, weight });
   };
+  /** multilingual phishing-lure pattern match helper */
+  const mlPhish = (key: "dearCustomer" | "unusualActivity" | "verifyAccount" | "paymentUpdate" | "clickThrough" | "deadlineThreat") =>
+    lex.phishing[key]?.some((p) => p.test(text)) ?? false;
 
   if (/\bdear\s+(customer|user|valued (customer|user|client))\b/i.test(text)) {
     addSignal("Generic greeting", "Addresses 'Dear Customer' instead of your name — mass-phishing tell", 1);
   }
+  if (mlPhish("dearCustomer")) {
+    addSignal("Localized phishing lure", "Translatable phishing cue detected in the message language", 1.5);
+  }
   if (/\b(unusual|suspicious)\s+(activity|login|sign[- ]?in|transaction|attempt)\b/i.test(text)) {
     addSignal("Fake security warning", "Claims unusual or suspicious activity to trigger fear", 2);
+  }
+  if (mlPhish("unusualActivity")) {
+    addSignal("Localized phishing lure", "Translatable phishing cue detected in the message language", 1.5);
   }
   if (
     /\b(verify|confirm|validate|restore|secure|unlock)\b[^.!?]{0,30}\baccount\b/i.test(text) ||
@@ -1438,8 +1572,14 @@ export function analyzeText(raw: string, options?: { expectedDomain?: string }):
   ) {
     addSignal("Account-verification demand", "Asks you to verify or secure your account — a classic phishing request", 1.5);
   }
+  if (mlPhish("verifyAccount")) {
+    addSignal("Localized phishing lure", "Translatable phishing cue detected in the message language", 1.5);
+  }
   if (/\b(update|confirm|submit)\b[^.!?]{0,30}\b(payment|billing|card)\s+(information|details|info)\b/i.test(text)) {
     addSignal("Payment-detail update lure", "Requests updated payment or billing details via an untrusted message", 2);
+  }
+  if (mlPhish("paymentUpdate")) {
+    addSignal("Localized phishing lure", "Translatable phishing cue detected in the message language", 1.5);
   }
   if (
     /\b(click|tap|select|go to)\b[^.!?]{0,20}\b(link|here|button|below)\b/i.test(text) &&
@@ -1447,9 +1587,15 @@ export function analyzeText(raw: string, options?: { expectedDomain?: string }):
   ) {
     addSignal("Click-through demand", "Presses the reader to follow a link to complete the action", 1.5);
   }
+  if (mlPhish("clickThrough")) {
+    addSignal("Click-through demand", "Presses the reader to follow a link to complete the action", 1.5);
+  }
   if (
     /\b(within \d+ (hours|minutes)|access will be (limited|restricted)|account (has been|will be) (locked|limited|frozen))\b/i.test(text)
   ) {
+    addSignal("Deadline / suspension threat", "Sets a short deadline or threatens restricted access", 2);
+  }
+  if (mlPhish("deadlineThreat")) {
     addSignal("Deadline / suspension threat", "Sets a short deadline or threatens restricted access", 2);
   }
 
@@ -1460,8 +1606,12 @@ export function analyzeText(raw: string, options?: { expectedDomain?: string }):
 
   const suspiciousUrls = urls.filter((u) => u.risk !== "low");
   const riskyAttachments = attachments.filter((a) => a.risk !== "low");
-  const credentialRequest = /\b(enter|provide|confirm|share|reply with)\b[^.!?]*\b(password|username|pin|otp|card|credentials)\b/i.test(text);
-  const otpRequest = /\b(otp|one[- ]time (code|password)|verification code)\b/i.test(text);
+  const credentialRequest =
+    /\b(enter|provide|confirm|share|reply with)\b[^.!?]*\b(password|username|pin|otp|card|credentials)\b/i.test(text) ||
+    lex.credentialRequest.some((p) => p.test(text));
+  const otpRequest =
+    /\b(otp|one[- ]time (code|password)|verification code)\b/i.test(text) ||
+    lex.otpRequest.some((p) => p.test(text));
 
   // 6) risk scoring
   let riskScore = 0;
@@ -1564,7 +1714,7 @@ export function analyzeText(raw: string, options?: { expectedDomain?: string }):
     receivedAt: new Date().toISOString(),
     textLength: text.length,
     wordCount: text.split(/\s+/).filter(Boolean).length,
-    language: "en",
+    language: lang,
     complaint: { category, categoryScore, issue, issueLabel, priority },
     sentiment: { label: sentimentLabel, score: Math.round(sentimentScore * 10) / 10, emotion, urgency },
     keywords,
@@ -1654,6 +1804,26 @@ Sincerely, Security Department`,
   {
     label: "Delivery issue (benign)",
     text: `Hi, my order #4521 still hasn't arrived after 9 days. The tracking link shows the package was out for delivery on Monday but nothing since. Can you check what happened to my parcel? Thanks!`,
+  },
+  {
+    label: "ES · phishing urgencia",
+    text: `\u00a1URGENTE! Su cuenta ha sido comprometida. Haga clic en este enlace inmediatamente para asegurar su cuenta e introduzca su contrase\u00f1a y c\u00f3digo de verificaci\u00f3n.\nVisite http://paypa1-seguridad.example/login dentro de 2 horas o su cuenta ser\u00e1 bloqueada.\nEstimado cliente, contacte con nuestro equipo en soporte@paypa1-seguridad.example`,
+  },
+  {
+    label: "FR · facturation double",
+    text: `Bonjour, j'ai \u00e9t\u00e9 factur\u00e9 deux fois pour ma commande #4521 ce mois-ci. Le montant de 49,99 \u20ac a \u00e9t\u00e9 pr\u00e9lev\u00e9 deux fois. Le remboursement demand\u00e9 n'est toujours pas arriv\u00e9. Merci de traiter cela rapidement.`,
+  },
+  {
+    label: "DE · Login-Problem",
+    text: `Guten Tag, ich kann mich seit gestern nicht mehr in mein Konto anmelden. Mein Passwort wird nicht akzeptiert, obwohl ich es zur\u00fcckgesetzt habe. Es ist das dritte Mal, dass dieses Problem auftritt. Bitte helfen Sie mir dringend.`,
+  },
+  {
+    label: "PT · entrega atrasada",
+    text: `Ol\u00e1, o meu pedido #88213 ainda n\u00e3o chegou ap\u00f3s 10 dias. O rastreio n\u00e3o atualiza desde a semana passada. Onde est\u00e1 a minha encomenda? Preciso de uma resposta o mais r\u00e1pido poss\u00edvel.`,
+  },
+  {
+    label: "HI · \u0916\u093e\u0924\u093e \u0938\u0941\u0930\u0915\u094d\u0937\u093e",
+    text: `\u0915\u093f\u0938\u0940 \u0928\u0947 \u092e\u0947\u0930\u0947 \u0916\u093e\u0924\u0947 \u0924\u0915 \u092a\u0939\u0901\u0902\u091a \u092c\u0928\u093e \u0932\u0940 \u0939\u0948 \u0914\u0930 \u20b925,000 \u092e\u0947\u0930\u0940 \u0905\u0928\u0941\u092e\u0924\u093f \u0915\u0947 \u092c\u093f\u0928\u093e \u091f\u094d\u0930\u093e\u0902\u0938\u092b\u0930 \u0915\u0930 \u0926\u093f\u090f \u0939\u0948\u0902\u0964 \u092e\u0941\u091d\u0947 \u0924\u0924\u094d\u0915\u093e\u0932 \u0938\u0939\u093e\u092f\u0924\u093e \u091a\u093e\u0939\u093f\u090f\u0964 \u0915\u0943\u092a\u092f\u093e \u091c\u0932\u094d\u0926 \u0938\u0947 \u091c\u0932\u094d\u0926 \u092e\u0947\u0930\u093e \u0916\u093e\u0924\u093e \u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0915\u0930\u0947\u0902\u0964`,
   },
 ];
 

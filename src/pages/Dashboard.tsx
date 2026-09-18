@@ -52,6 +52,7 @@ import {
 import { generateSampleCorpus } from "@/lib/sample-corpus";
 import { buildCombinedIntel } from "@/lib/combined-intel";
 import { conversationId } from "@/lib/analytics";
+import { LANG_LABELS } from "@/lib/analyzer";
 import AnalyticsView from "@/pages/AnalyticsView";
 
 /** Spec §6 demo: a long 24-message support thread. */
@@ -966,6 +967,8 @@ export default function Dashboard() {
                     <p>
                       <span className="text-muted-foreground">Conversation ID:</span>{" "}
                       <span className="font-semibold">{conversationId(result)}</span>
+                      <span className="text-muted-foreground"> · Language:</span>{" "}
+                      <span className="font-semibold">{LANG_LABELS[result.language]}</span>
                     </p>
                     <p>
                       <span className="text-muted-foreground">Customer Issue:</span> {result.summary.issue}
