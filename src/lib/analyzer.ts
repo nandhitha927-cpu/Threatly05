@@ -730,8 +730,25 @@ export function analyzeText(raw: string): AnalysisResult {
 
   const urgentHits = countMatches(lower, URGENT_WORDS);
   const compromiseSignals = (lower.match(/\b(compromised|hacked|unauthorized|fraud|stolen|breach)\b/g) ?? []).length;
+  // repeated contact attempts ("three times", "multiple tickets") and being ignored
+  // ("nobody has solved", "no response", "still not resolved") are urgency signals
+  const repeatContactHits =
+    (lower.match(/\b(second|third|fourth|fifth|2nd|3rd|4th|5th)\s+time\b/g) ?? []).length +
+    (lower.match(/\b(two|three|four|five|six|seven|\d+)\s+times\b/g) ?? []).length +
+    (lower.match(/\b(multiple|several|countless|repeated)\s+(times|tickets|emails|calls|attempts|messages)\b/g) ?? []).length;
+  const ignoredSignals =
+    (lower.match(/\bno (response|reply|answer)\b/g) ?? []).length +
+    (lower.match(/\b(no ?one|nobody) (has |have )?(replied|responded|answered|solved|fixed|helped)\b/g) ?? []).length +
+    (lower.match(/\bstill (not |isn'?t )?(resolved|fixed)\b/g) ?? []).length;
   let urgency: Priority = "Low";
-  if (urgentHits >= 1) urgency = "High";
+  if (ignoredSignals >= 1) urgency = "Medium";
+  if (
+    urgentHits >= 1 ||
+    repeatContactHits >= 2 ||
+    (repeatContactHits >= 1 && sentimentLabel === "Negative") ||
+    (ignoredSignals >= 1 && sentimentLabel === "Negative")
+  )
+    urgency = "High";
   if (urgentHits >= 2 || compromiseSignals >= 1) urgency = "Critical";
 
   // 3) resolution status
