@@ -49,6 +49,7 @@ import {
   type TrendRow,
 } from "@/lib/analyzer";
 import { generateSampleCorpus } from "@/lib/sample-corpus";
+import { buildCombinedIntel } from "@/lib/combined-intel";
 
 /** Spec §6 demo: a long 24-message support thread. */
 const DEMO_THREAD = `Customer: Hi, I was charged twice for my order #88213 this month. The amount ₹1,299 was deducted two times.
@@ -229,6 +230,9 @@ export default function Dashboard() {
   const trends = useMemo(() => aggregateIssues(corpus), [corpus]);
   const maxTrendCount = trends[0]?.count ?? 1;
 
+  // Spec §9: combined intelligence synthesis for the latest result
+  const combined = useMemo(() => (result ? buildCombinedIntel(result, input) : null), [result, input]);
+
   // Spec §6: structured summary for the latest result
   const convSummary = useMemo(() => {
     if (!result) return null;
@@ -353,39 +357,118 @@ export default function Dashboard() {
             transition={{ duration: 0.35 }}
             className="mt-6 grid gap-6"
           >
-            {/* Verdict banner */}
-            <div
-              className={`flex flex-col gap-3 rounded-2xl border p-5 sm:flex-row sm:items-center sm:justify-between ${
-                result.security.hasThreat
-                  ? "border-red-500/30 bg-red-500/5"
-                  : "border-emerald-500/25 bg-emerald-500/5"
-              }`}
-            >
-              <div className="flex items-start gap-3">
-                {result.security.hasThreat ? (
-                  <ShieldAlert className="mt-0.5 size-6 shrink-0 text-red-600" />
-                ) : (
-                  <ShieldCheck className="mt-0.5 size-6 shrink-0 text-emerald-600" />
-                )}
-                <div>
-                  <p className="font-semibold tracking-tight">
-                    {result.security.hasThreat
-                      ? `Security threat detected — ${result.security.riskLevel} risk (score ${result.security.riskScore})`
-                      : "No security threat detected"}
+            {/* Spec §9: Combined intelligence verdict */}
+            {combined && (
+              <div
+                className={`rounded-2xl border p-5 ${
+                  result.security.hasThreat
+                    ? "border-red-500/30 bg-red-500/5"
+                    : "border-emerald-500/25 bg-emerald-500/5"
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="flex items-center gap-2 font-semibold tracking-tight">
+                    {result.security.hasThreat ? (
+                      <ShieldAlert className="size-5 text-red-600" />
+                    ) : (
+                      <ShieldCheck className="size-5 text-emerald-600" />
+                    )}
+                    {combined.threatVerdict}
                   </p>
-                  <p className="mt-0.5 text-sm text-muted-foreground">
-                    {result.security.recommendedAction}
+                  <Badge
+                    className={`border font-semibold shadow-none ${riskStyles[result.security.riskLevel]}`}
+                  >
+                    Risk: {result.security.riskLevel} ({result.security.riskScore})
+                  </Badge>
+                </div>
+                <p className="mt-1.5 text-sm font-medium text-foreground/90">
+                  {combined.seriousness}
+                </p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {/* Customer intelligence */}
+                  <div className="rounded-xl border border-border/60 bg-background/50 p-3.5">
+                    <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      <Tag className="size-3.5 text-blue-600" />
+                      Customer intelligence
+                    </p>
+                    <ul className="mt-2 grid gap-1 text-sm">
+                      <li>
+                        <span className="text-muted-foreground">Category: </span>
+                        <span className="font-medium">{combined.customer.category}</span>
+                        {combined.customer.issueLabel !== "General Inquiry" && (
+                          <span className="text-muted-foreground"> · {combined.customer.issueLabel}</span>
+                        )}
+                      </li>
+                      <li>
+                        <span className="text-muted-foreground">Sentiment: </span>
+                        <span className="font-medium">
+                          {combined.customer.sentiment} · {combined.customer.emotion}
+                        </span>
+                      </li>
+                      <li>
+                        <span className="text-muted-foreground">Priority: </span>
+                        <span className="font-medium">{combined.customer.priority}</span>
+                      </li>
+                      <li>
+                        <span className="text-muted-foreground">Customer request: </span>
+                        <span className="font-medium">{combined.customer.customerRequest}</span>
+                      </li>
+                      <li className="text-xs text-muted-foreground">{combined.customer.whatTheySay}</li>
+                    </ul>
+                  </div>
+                  {/* Security intelligence */}
+                  <div className="rounded-xl border border-border/60 bg-background/50 p-3.5">
+                    <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      <ShieldAlert className="size-3.5 text-orange-600" />
+                      Security intelligence
+                    </p>
+                    <ul className="mt-2 grid gap-1 text-sm">
+                      <li>
+                        <span className="text-muted-foreground">Threat type: </span>
+                        <span className="font-medium">
+                          {combined.security.threatTypes.length > 0
+                            ? combined.security.threatTypes.join(", ")
+                            : "None"}
+                        </span>
+                      </li>
+                      <li>
+                        <span className="text-muted-foreground">Social engineering: </span>
+                        <span className={combined.security.socialEngineering ? "font-semibold text-orange-700" : "font-medium"}>
+                          {combined.security.socialEngineering ? "Yes" : "No"}
+                        </span>
+                        {combined.security.socialEngineering && (
+                          <span className="text-muted-foreground"> — {combined.security.techniques}</span>
+                        )}
+                      </li>
+                      <li>
+                        <span className="text-muted-foreground">Suspicious URL: </span>
+                        <span className={combined.security.suspiciousUrl ? "font-semibold text-red-700" : "font-medium"}>
+                          {combined.security.suspiciousUrl ? "Detected" : "None"}
+                        </span>
+                      </li>
+                      <li>
+                        <span className="text-muted-foreground">Credential request: </span>
+                        <span className={combined.security.credentialRequest ? "font-semibold text-red-700" : "font-medium"}>
+                          {combined.security.credentialRequest ? "Detected" : "None"}
+                        </span>
+                      </li>
+                      <li>
+                        <span className="text-muted-foreground">OTP request: </span>
+                        <span className={combined.security.otpRequest ? "font-semibold text-red-700" : "font-medium"}>
+                          {combined.security.otpRequest ? "Detected" : "None"}
+                        </span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+                <div className="mt-3 rounded-xl border border-border/60 bg-background/60 p-3.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Recommended action
                   </p>
+                  <p className="mt-1 text-sm font-medium">{combined.recommendedAction}</p>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {result.security.threatTypes.map((t) => (
-                  <Badge key={t} className="border-red-500/25 bg-red-500/10 text-red-700 shadow-none">
-                    {t}
-                  </Badge>
-                ))}
-              </div>
-            </div>
+            )}
 
             {/* Spec §6: conversation summary */}
             {convSummary && convSummary.isMultiTurn && (

@@ -110,6 +110,40 @@ export interface ConversationSummary {
   turnCount: number;
 }
 
+/**
+ * Combined intelligence (product spec §9): the synthesis of customer-support
+ * and security analysis answering, for every conversation: what is the
+ * customer saying, what do they need, how serious is it, and is it a threat?
+ */
+export interface CombinedIntel {
+  customer: {
+    category: string;
+    issueLabel: string;
+    sentiment: string;
+    emotion: string;
+    priority: Priority;
+    customerRequest: string;
+    /** one-phrase answer to "what is the customer saying?" */
+    whatTheySay: string;
+  };
+  security: {
+    threatTypes: string[];
+    socialEngineering: boolean;
+    /** e.g. "Urgency + credential harvesting" */
+    techniques: string;
+    suspiciousUrl: boolean;
+    credentialRequest: boolean;
+    otpRequest: boolean;
+    riskLevel: RiskLevel;
+    riskScore: number;
+  };
+  /** one-phrase answer to "how serious is the issue?" */
+  seriousness: string;
+  /** one-phrase answer to "is this a security threat?" */
+  threatVerdict: string;
+  recommendedAction: string;
+}
+
 export type TurnRole = "customer" | "support" | "unknown";
 
 export interface ConversationTurn {
