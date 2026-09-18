@@ -1,32 +1,38 @@
 import { type AnalysisResult, type CombinedIntel } from "./analyzer";
+import { type SupportedLang } from "./languages";
+import { phrases, tr } from "./report-i18n";
 
 /**
  * Fuse customer-support intelligence and security intelligence into one
  * answer to: what is the customer saying, what do they need, how serious is
  * the issue, and is this interaction a security threat? (product spec §9)
+ *
+ * All synthesized phrases are produced in the selected UI language.
  */
-export function buildCombinedIntel(r: AnalysisResult, rawText?: string): CombinedIntel {
-  const techniqueNames = r.security.socialEngineering.map((t) => t.technique);
+export function buildCombinedIntel(
+  r: AnalysisResult,
+  rawText?: string,
+  uiLang: SupportedLang = "en",
+): CombinedIntel {
+  const P = phrases(uiLang);
+
+  const techniqueNames = r.security.socialEngineering.map((t) =>
+    tr(uiLang, "techniques", t.technique),
+  );
   const combinedTechniques =
-    techniqueNames.length > 0 ? techniqueNames.join(" + ") : "None detected";
+    techniqueNames.length > 0 ? techniqueNames.join(" + ") : P.noTechniques;
 
   // what is the customer saying — issue label + summary issue
   const whatTheySay =
     r.complaint.issueLabel !== "General Inquiry"
-      ? `Reporting ${r.complaint.issueLabel.toLowerCase()}`
+      ? P.whatTheySay(tr(uiLang, "issueLabels", r.complaint.issueLabel))
       : r.summary.issue.slice(0, 100);
 
   // how serious — derived from priority + stakes
-  const seriousness =
-    r.complaint.priority === "Critical"
-      ? "Critical — immediate response required"
-      : r.complaint.priority === "High"
-        ? r.security.moneyMentioned
-          ? "High — money at stake, respond promptly"
-          : "High — respond promptly"
-        : r.complaint.priority === "Medium"
-          ? "Medium — handle within normal SLA"
-          : "Low — routine inquiry";
+  const seriousness = P.seriousness(
+    r.complaint.priority,
+    r.security.moneyMentioned,
+  );
 
   // spec §9: "click this link" without a literal URL still counts as a
   // suspicious link indicator — phishes often hide the href in buttons/images
@@ -38,9 +44,10 @@ export function buildCombinedIntel(r: AnalysisResult, rawText?: string): Combine
       /(\u0d15\u0d4d\u0d32\u0d3f\u0d15\u0d4d\u0d15\u0d4d|\u0d32\u0d3f\u0d19\u0d4d\u0d15\u0d4d|\u0d07\u0d35\u0d3f\u0d1f\u0d46)/.test(rawText));
 
   // threat verdict
+  const riskT = tr(uiLang, "riskLevels", r.security.riskLevel);
   const threatVerdict = r.security.hasThreat
-    ? `Security threat detected — ${r.security.riskLevel} risk (score ${r.security.riskScore})`
-    : "No security threat indicators";
+    ? P.threatVerdictThreat(riskT, r.security.riskScore)
+    : P.threatVerdictNone;
 
   // recommended action: fuse security escalation with urgent-rule guidance
   let action: string;
@@ -51,35 +58,38 @@ export function buildCombinedIntel(r: AnalysisResult, rawText?: string): Combine
   } else if (r.urgent.isUrgent) {
     action = r.urgent.recommendedAction;
   } else {
-    action = `Route by category "${r.complaint.category}" and sentiment to the right queue.`;
+    action = P.actionRoute(tr(uiLang, "categories", r.complaint.category));
   }
+  // translate the assembled action sentence-by-sentence
+  action = translateSentence(action, uiLang);
+
   if (
     r.security.hasThreat &&
     (r.security.credentialRequest || r.security.otpRequest) &&
     !/credential|otp|link/i.test(action)
   ) {
-    action += " Do not follow suspicious links or disclose credentials.";
+    action += P.actionNoLinks;
   }
   if (
     linkReference &&
     r.security.hasThreat &&
     !/do not (follow|click)/i.test(action)
   ) {
-    action += " Do not allow anyone to follow the referenced link.";
+    action += P.actionNoLinkFollow;
   }
 
   return {
     customer: {
-      category: r.complaint.category,
-      issueLabel: r.complaint.issueLabel,
-      sentiment: r.sentiment.label,
-      emotion: r.sentiment.emotion,
+      category: tr(uiLang, "categories", r.complaint.category),
+      issueLabel: tr(uiLang, "issueLabels", r.complaint.issueLabel),
+      sentiment: tr(uiLang, "sentiments", r.sentiment.label),
+      emotion: tr(uiLang, "emotions", r.sentiment.emotion),
       priority: r.complaint.priority,
       customerRequest: r.summary.customerRequest,
       whatTheySay,
     },
     security: {
-      threatTypes: r.security.threatTypes,
+      threatTypes: r.security.threatTypes.map((t) => tr(uiLang, "threatTypes", t)),
       socialEngineering: r.security.socialEngineering.length > 0,
       techniques: combinedTechniques,
       suspiciousUrl: r.security.urls.some((u) => u.risk !== "low") || linkReference,
@@ -92,4 +102,24 @@ export function buildCombinedIntel(r: AnalysisResult, rawText?: string): Combine
     threatVerdict,
     recommendedAction: action,
   };
+}
+
+/**
+ * Sentence-wise translation of fused English action strings. Splits on
+ * sentence boundaries and looks up each fragment in the actions and
+ * urgentActions tables (which contain the exact engine sentences).
+ */
+function translateSentence(action: string, lang: SupportedLang): string {
+  const parts = action.split(/(?<=[.!?])\s+/);
+  const translated = parts.map((part) => {
+    const trimmed = part.trim();
+    if (!trimmed) return part;
+    const lookup = trimmed.endsWith(".") ? trimmed : `${trimmed}.`;
+    return (
+      tr(lang, "actions", lookup) ||
+      tr(lang, "urgentActions", lookup) ||
+      trimmed
+    );
+  });
+  return translated.join(" ");
 }

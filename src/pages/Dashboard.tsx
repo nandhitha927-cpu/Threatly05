@@ -69,6 +69,7 @@ import {
 } from "@/lib/analyzer";
 import { generateSampleCorpus } from "@/lib/sample-corpus";
 import { buildCombinedIntel } from "@/lib/combined-intel";
+import { tr } from "@/lib/report-i18n";
 import { conversationId } from "@/lib/analytics";
 import AnalyticsView from "@/pages/AnalyticsView";
 
@@ -255,7 +256,10 @@ export default function Dashboard() {
   const maxTrendCount = trends[0]?.count ?? 1;
 
   // Spec §9: combined intelligence synthesis for the latest result
-  const combined = useMemo(() => (result ? buildCombinedIntel(result, input) : null), [result, input]);
+  const combined = useMemo(
+    () => (result ? buildCombinedIntel(result, input, uiLang) : null),
+    [result, input, uiLang],
+  );
 
   // Spec §6: structured summary for the latest result
   const convSummary = useMemo(() => {
@@ -443,7 +447,7 @@ export default function Dashboard() {
                   <Badge
                     className={`border font-semibold shadow-none ${riskStyles[result.security.riskLevel]}`}
                   >
-                    Risk: {result.security.riskLevel} ({result.security.riskScore})
+                    Risk: {tr(uiLang, "riskLevels", result.security.riskLevel)} ({result.security.riskScore})
                   </Badge>
                 </div>
                 <p className="mt-1.5 text-sm font-medium text-foreground/90">
@@ -590,20 +594,20 @@ export default function Dashboard() {
               <StatCard
                 icon={Tag}
                 label="Complaint category"
-                value={result.complaint.category}
-                hint={`Issue: ${result.complaint.issueLabel} · Match score ${result.complaint.categoryScore}`}
+                value={tr(uiLang, "categories", result.complaint.category)}
+                hint={`Issue: ${tr(uiLang, "issueLabels", result.complaint.issueLabel)} · Match score ${result.complaint.categoryScore}`}
               />
               <StatCard
                 icon={Gauge}
                 label="Sentiment"
-                value={`${result.sentiment.label} · ${result.sentiment.emotion}`}
-                hint={`Urgency: ${result.sentiment.urgency}`}
+                value={`${tr(uiLang, "sentiments", result.sentiment.label)} · ${tr(uiLang, "emotions", result.sentiment.emotion)}`}
+                hint={`Urgency: ${tr(uiLang, "priorities", result.sentiment.urgency)}`}
               />
               <StatCard
                 icon={AlertTriangle}
                 label="Priority"
-                value={result.complaint.priority}
-                hint={`Resolution: ${result.resolution.status}`}
+                value={tr(uiLang, "priorities", result.complaint.priority)}
+                hint={`Resolution: ${tr(uiLang, "resolutions", result.resolution.status)}`}
               />
               <StatCard
                 icon={Sparkles}
@@ -652,11 +656,11 @@ export default function Dashboard() {
                         <div className="mt-2 flex flex-wrap gap-1.5">
                           {result.urgent.reasons.map((reason) => (
                             <Badge key={reason} className="border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300 shadow-none">
-                              {reason}
+                              {tr(uiLang, "urgentReasons", reason)}
                             </Badge>
                           ))}
                         </div>
-                        <p className="mt-2 text-sm text-foreground/90">{result.urgent.recommendedAction}</p>
+                        <p className="mt-2 text-sm text-foreground/90">{tr(uiLang, "urgentActions", result.urgent.recommendedAction)}</p>
                       </div>
                     )}
                     <div className="glass-inset rounded-xl p-4">
@@ -1006,19 +1010,19 @@ export default function Dashboard() {
                       <span className="text-muted-foreground">Customer Issue:</span> {result.summary.issue}
                     </p>
                     <p>
-                      <span className="text-muted-foreground">Category:</span> {result.complaint.category}
+                      <span className="text-muted-foreground">Category:</span> {tr(uiLang, "categories", result.complaint.category)}
                     </p>
                     <p>
-                      <span className="text-muted-foreground">Sentiment:</span> {result.sentiment.label}
-                      <span className="text-muted-foreground"> · Emotion:</span> {result.sentiment.emotion}
-                      <span className="text-muted-foreground"> · Urgency:</span> {result.sentiment.urgency}
+                      <span className="text-muted-foreground">Sentiment:</span> {tr(uiLang, "sentiments", result.sentiment.label)}
+                      <span className="text-muted-foreground"> · Emotion:</span> {tr(uiLang, "emotions", result.sentiment.emotion)}
+                      <span className="text-muted-foreground"> · Urgency:</span> {tr(uiLang, "priorities", result.sentiment.urgency)}
                     </p>
                     <p>
                       <span className="text-muted-foreground">Priority:</span>{" "}
-                      <span className="font-semibold">{result.complaint.priority}</span>
+                      <span className="font-semibold">{tr(uiLang, "priorities", result.complaint.priority)}</span>
                     </p>
                     <p>
-                      <span className="text-muted-foreground">Resolution Status:</span> {result.resolution.status}
+                      <span className="text-muted-foreground">Resolution Status:</span> {tr(uiLang, "resolutions", result.resolution.status)}
                     </p>
                     {convSummary && (
                       <p>
@@ -1035,7 +1039,7 @@ export default function Dashboard() {
                     {result.security.hasThreat && (
                       <>
                         <p>
-                          <span className="text-muted-foreground">Threat Type:</span> {result.security.threatTypes.join(", ") || "—"}
+                          <span className="text-muted-foreground">Threat Type:</span> {result.security.threatTypes.map((t) => tr(uiLang, "threatTypes", t)).join(", ") || "—"}
                         </p>
                         {result.security.urls.length > 0 && (
                           <p>
@@ -1049,11 +1053,11 @@ export default function Dashboard() {
                         )}
                         <p>
                           <span className="text-muted-foreground">Social Engineering:</span>{" "}
-                          {result.security.socialEngineering.length > 0 ? `Possible (${result.security.socialEngineering[0].technique})` : "No"}
+                          {result.security.socialEngineering.length > 0 ? `Possible (${tr(uiLang, "techniques", result.security.socialEngineering[0].technique)})` : "No"}
                         </p>
                         <p>
                           <span className="text-muted-foreground">Risk Level:</span>{" "}
-                          <span className="font-semibold">{result.security.riskLevel}</span>
+                          <span className="font-semibold">{tr(uiLang, "riskLevels", result.security.riskLevel)}</span>
                         </p>
                       </>
                     )}
