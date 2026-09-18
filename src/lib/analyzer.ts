@@ -620,7 +620,7 @@ const ISSUE_LABEL_RULES: [RegExp, string][] = [
     "Unauthorized Charge",
   ],
   [
-    /\brefund\b[^.!?]{0,40}\b(delay|still|waiting|not received|week)\b/i,
+    /\brefund\b[^.!?]{0,60}\b(delay|delayed|still|waiting|pending|not received|weeks?)\b/i,
     "Refund Delay",
   ],
   [/\brefund\b|\bmoney back\b|\breimburse/i, "Refund Requested"],
@@ -1019,3 +1019,59 @@ Sincerely, Security Department`,
     text: `Hi, my order #4521 still hasn't arrived after 9 days. The tracking link shows the package was out for delivery on Monday but nothing since. Can you check what happened to my parcel? Thanks!`,
   },
 ];
+
+// ─── recurring-issues aggregation ─────────────────────────────────────────
+
+export interface TrendRow {
+  issue: string;
+  count: number;
+  /** share of the analyzed corpus (0–1) */
+  share: number;
+  /** mean sentiment: -1 negative, 0 neutral, +1 positive */
+  avgSentiment: number;
+  /** mean urgency: 0 Low, 1 Medium, 2 High, 3 Critical */
+  avgUrgency: number;
+  /** fraction of this issue's conversations flagged as security threats (0–1) */
+  threatShare: number;
+}
+
+const URGENCY_SCORE: Record<Priority, number> = { Low: 0, Medium: 1, High: 2, Critical: 3 };
+
+/**
+ * Group analyzed conversations by issue label (falling back to the complaint
+ * category when no specific issue was detected) and rank them by frequency —
+ * the "frequently reported issues" view from the product spec.
+ */
+export function aggregateIssues(results: AnalysisResult[]): TrendRow[] {
+  const total = results.length;
+  if (total === 0) return [];
+
+  const groups = new Map<
+    string,
+    { count: number; sentimentSum: number; urgencySum: number; threats: number }
+  >();
+  for (const r of results) {
+    const key =
+      r.complaint.issueLabel && r.complaint.issueLabel !== "General Inquiry"
+        ? r.complaint.issueLabel
+        : r.complaint.category;
+    const g = groups.get(key) ?? { count: 0, sentimentSum: 0, urgencySum: 0, threats: 0 };
+    g.count += 1;
+    g.sentimentSum +=
+      r.sentiment.label === "Negative" ? -1 : r.sentiment.label === "Positive" ? 1 : 0;
+    g.urgencySum += URGENCY_SCORE[r.sentiment.urgency];
+    if (r.security.hasThreat) g.threats += 1;
+    groups.set(key, g);
+  }
+
+  return Array.from(groups.entries())
+    .map(([issue, g]) => ({
+      issue,
+      count: g.count,
+      share: g.count / total,
+      avgSentiment: Math.round((g.sentimentSum / g.count) * 100) / 100,
+      avgUrgency: Math.round((g.urgencySum / g.count) * 100) / 100,
+      threatShare: Math.round((g.threats / g.count) * 100) / 100,
+    }))
+    .sort((a, b) => b.count - a.count || a.issue.localeCompare(b.issue));
+}

@@ -15,6 +15,8 @@ import {
   ListFilter,
   LogOut,
   Inbox,
+  TrendingUp,
+  Layers,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,9 +41,12 @@ import { useAuth } from "@/hooks/use-auth";
 import { useNavigate } from "react-router";
 import {
   analyzeText,
+  aggregateIssues,
   SAMPLE_EMAILS,
   type AnalysisResult,
+  type TrendRow,
 } from "@/lib/analyzer";
+import { generateSampleCorpus } from "@/lib/sample-corpus";
 
 const riskStyles: Record<string, string> = {
   Low: "bg-emerald-500/10 text-emerald-700 border-emerald-500/25",
@@ -116,12 +121,56 @@ function FindingRow({
   );
 }
 
+function TrendRowItem({
+  row,
+  rank,
+  maxCount,
+}: {
+  row: TrendRow;
+  rank: number;
+  maxCount: number;
+}) {
+  const pct = Math.round((row.count / maxCount) * 100);
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -12 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.3, delay: Math.min(rank * 0.04, 0.4) }}
+      className="flex flex-col gap-2 rounded-xl border border-border/70 p-3.5 sm:flex-row sm:items-center sm:gap-4"
+    >
+      <div className="flex min-w-0 items-center gap-3 sm:w-64 sm:shrink-0">
+        <span className="w-6 text-center text-xs font-semibold text-muted-foreground">
+          {rank}
+  </span>
+        <p className="truncate text-sm font-medium">{row.issue}</p>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+          <motion.div
+            className="h-full rounded-full bg-blue-600/80"
+            initial={{ width: 0 }}
+            animate={{ width: `${pct}%` }}
+            transition={{ duration: 0.6, delay: Math.min(rank * 0.04, 0.4) }}
+          />
+        </div>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          {(row.share * 100).toFixed(1)}% of corpus · avg sentiment {row.avgSentiment.toFixed(2)} · avg urgency {row.avgUrgency.toFixed(2)} · threat share {(row.threatShare * 100).toFixed(0)}%
+        </p>
+      </div>
+      <Badge variant="secondary" className="font-mono shadow-none sm:shrink-0">
+        {row.count.toLocaleString()} reports
+      </Badge>
+    </motion.div>
+  );
+}
+
 export default function Dashboard() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const [input, setInput] = useState("");
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [history, setHistory] = useState<AnalysisResult[]>([]);
+  const [batch, setBatch] = useState<AnalysisResult[] | null>(null);
 
   const analyze = () => {
     if (!input.trim()) return;
@@ -145,6 +194,14 @@ export default function Dashboard() {
     () => history.filter((h) => h.security.hasThreat).length,
     [history],
   );
+  const corpus = useMemo(() => batch ?? history, [batch, history]);
+  const trends = useMemo(() => aggregateIssues(corpus), [corpus]);
+  const maxTrendCount = trends[0]?.count ?? 1;
+
+  const runDemoBatch = () => {
+    const corpusResults = generateSampleCorpus(500);
+    setBatch(corpusResults);
+  };
 
   return (
     <div className="glass-backdrop min-h-screen text-foreground">
@@ -477,6 +534,61 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           </motion.div>
+        )}
+
+        {/* Frequently reported issues */}
+        {trends.length > 0 && (
+          <Card className="glass-panel mt-6 border-white/70 shadow-none">
+            <CardHeader className="pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+                    <TrendingUp className="size-4 text-blue-600" />
+                    Frequently reported issues
+                  </CardTitle>
+                  <CardDescription>
+                    {batch
+                      ? `Systemic problems across a ${corpus.length.toLocaleString()}-conversation demo batch`
+                      : "Recurring issues across this session — run a demo batch for volume trends"}
+                  </CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="gap-2"
+                    onClick={runDemoBatch}
+                    disabled={!!batch}
+                  >
+                    <Layers className="size-4" />
+                    Run 500-message demo batch
+                  </Button>
+                  {batch && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="glass-chip border-white/70"
+                      onClick={() => setBatch(null)}
+                    >
+                      <RotateCcw className="size-4" />
+                      Clear batch
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="grid gap-2.5">
+              {trends.slice(0, 10).map((t, i) => (
+                <TrendRowItem
+                  key={t.issue}
+                  row={t}
+                  rank={i + 1}
+                  maxCount={maxTrendCount}
+                />
+              ))}
+            </CardContent>
+          </Card>
         )}
 
         {/* History */}
