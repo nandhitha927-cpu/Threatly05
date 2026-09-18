@@ -84,6 +84,36 @@ export interface MessageSummary {
   currentStatus: string | null;
 }
 
+export type TurnRole = "customer" | "support" | "unknown";
+
+export interface ConversationTurn {
+  role: TurnRole;
+  text: string;
+}
+
+/** Resolution state of one conversation turn. */
+export type TurnStatus = "Resolved" | "Unresolved" | "Unclear";
+
+export interface TurnAnalysis {
+  index: number;
+  role: TurnRole;
+  text: string;
+  status: TurnStatus;
+  /** why this turn was marked Resolved / Unresolved / Unclear */
+  signals: string[];
+}
+
+export interface FollowUpInfo {
+  /** true when the latest state of the conversation is not resolved */
+  needsFollowUp: boolean;
+  /** who spoke last — a conversation ending on an unhappy customer is hot */
+  lastSpeaker: TurnRole;
+  /** status as of the end of the conversation */
+  finalStatus: "Resolved" | "Unresolved" | "Unclear";
+  /** "Checking…" promises that were never closed out later in the thread */
+  openPromises: string[];
+}
+
 export interface AnalysisResult {
   id: string;
   channel: string;
@@ -108,6 +138,9 @@ export interface AnalysisResult {
   resolution: {
     status: "Resolved" | "Unresolved" | "Unclear";
     signals: string[];
+    turns: ConversationTurn[];
+    turnAnalyses: TurnAnalysis[];
+    followUp: FollowUpInfo;
   };
   summary: MessageSummary;
   urgent: {
@@ -606,6 +639,96 @@ const URGENT_WORDS = [
   "urgent", "asap", "immediately", "right now", "emergency", "critical",
   "as soon as possible", "today", "escalate",
 ];
+/**
+ * Split a pasted thread into turns. Recognizes "Customer:/Support:/Agent:" style
+ * prefixes (also localized) and falls back to blank-line paragraphs, attributing
+ * the first paragraph to the customer.
+ */
+export function splitConversation(raw: string): ConversationTurn[] {
+  const lines = raw.split(/\r?\n/);
+  const labeled = lines.some((l) => /^(customer|support|agent|user|client|representative|rep|bot|kunde|kunden)\s*:/i.test(l.trim()));
+  if (labeled) {
+    const turns: ConversationTurn[] = [];
+    let cur: ConversationTurn | null = null;
+    for (const line of lines) {
+      const m = line.trim().match(/^(customer|support|agent|user|user|client|representative|rep|bot|kunde)\s*:\s*(.*)$/i);
+      if (m) {
+        const roleRaw = m[1].toLowerCase();
+        const role: TurnRole =
+          /^(customer|user|client|kunde)$/.test(roleRaw)
+            ? "customer"
+            : /^(support|agent|representative|rep|bot)$/.test(roleRaw)
+              ? "support"
+              : "unknown";
+        if (cur) turns.push(cur);
+        cur = { role, text: m[2] };
+      } else if (cur) {
+        cur.text += ` ${line.trim()}`;
+      }
+  }
+    if (cur) turns.push(cur);
+    return turns.filter((t) => t.text.trim().length > 0);
+  }
+
+  // unlabeled: blank-line separated paragraphs; first speaker assumed customer
+  const paras = raw
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (paras.length <= 1) {
+    return [{ role: "customer", text: raw.trim() }];
+  }
+  return paras.map((p, i) => ({
+    role: (i % 2 === 0 ? "customer" : "support") as TurnRole,
+    text: p,
+  }));
+}
+
+const TURN_RESOLVED_PATTERNS: RegExp[] = [
+  /\b(resolved|solved|fixed|closed|completed)\b/i,
+  /\b(has been|have been|was) (issued|processed|refunded|credited)\b/i,
+  /\b(issue (was|has been) fixed)\b/i,
+  /\b(working again|all good|problem solved)\b/i,
+];
+const TURN_UNRESOLVED_PATTERNS: RegExp[] = [
+  /\b(still|yet to (be )?(receive|resolve|fix)|haven'?t|hasn'?t|didn'?t)\b/i,
+  /\b(no response|no reply|nobody (has )?(replied|responded|solved|fixed|helped))\b/i,
+  /\b(pending|awaiting|waiting|unresolved|open)\b/i,
+  /\b(third|fourth|fifth|3rd|4th|5th) time\b/i,
+  /\b(not (?:resolved|fixed|received|confirmed|arrived))\b/i,
+  /\b(when will i (get|receive)|where is my (refund|money|order|package))\b/i,
+];
+const TURN_SUPPORT_PROMISE_PATTERNS: RegExp[] = [
+  /\b(we are|we'?re|let me|i will|i'?ll|our team (is|will)) (?:currently )?(checking|looking into|investigating|escalating)\b/i,
+  /\b(we will|we'll|our team will) (?:get back|revert|follow up|process|issue|refund)\b/i,
+  /\b(please wait|kindly wait|bear with (?:us|me))\b/i,
+  /\b(as soon as possible|shortly|soon)\b/i,
+  /\b(under (review|investigation)|escalated (?:to )?(?:the )?(?:team|department|concerned))\b/i,
+];
+
+/**
+ * Analyze resolution state of a single turn. Support "checking"-type replies
+ * count as open promises, not as resolutions.
+ */
+export function analyzeTurn(turn: ConversationTurn, index: number): TurnAnalysis {
+  const signals: string[] = [];
+  const resolvedHit = TURN_RESOLVED_PATTERNS.some((p) => p.test(turn.text));
+  const unresolvedHit = TURN_UNRESOLVED_PATTERNS.some((p) => p.test(turn.text));
+  const promiseHit = TURN_SUPPORT_PROMISE_PATTERNS.some((p) => p.test(turn.text));
+  let status: TurnStatus = "Unclear";
+  if (resolvedHit) {
+    status = "Resolved";
+    signals.push("Resolution language detected");
+  } else if (unresolvedHit) {
+    status = "Unresolved";
+    signals.push("Open-issue language detected");
+  } else if (promiseHit) {
+    status = "Unresolved";
+    signals.push("Support promise not yet fulfilled");
+  }
+  return { index, role: turn.role, text: turn.text, status, signals };
+}
+
 const RESOLVED_MARKERS = [
   "resolved", "solved", "fixed", "closed", "completed", "all good",
   "working again", "issue was fixed",
@@ -825,10 +948,37 @@ export function analyzeText(raw: string): AnalysisResult {
     ...resolvedHits.map((m) => `Resolved marker: "${m}"`),
     ...unresolvedHits.map((m) => `Open-issue marker: "${m}"`),
   ];
+
+  // 3b) conversation-aware resolution (spec §5): analyze turn by turn
+  const turns = splitConversation(text);
+  const turnAnalyses = turns.map((t, i) => analyzeTurn(t, i));
+  const openPromises = turnAnalyses
+    .filter(
+      (t) =>
+        t.role === "support" &&
+        t.signals.includes("Support promise not yet fulfilled") &&
+        !turnAnalyses.some((a) => a.index > t.index && a.status === "Resolved"),
+    )
+    .map((t) => t.text.trim().slice(0, 120));
+
+  const lastTurn = turnAnalyses[turnAnalyses.length - 1];
+  const anyResolved = turnAnalyses.some((t) => t.status === "Resolved");
   const resolutionStatus: AnalysisResult["resolution"]["status"] =
-    unresolvedHits.length > resolvedHits.length ? "Unresolved"
-    : resolvedHits.length > 0 ? "Resolved"
-    : "Unclear";
+    lastTurn?.status === "Unresolved" || (openPromises.length > 0 && !anyResolved)
+      ? "Unresolved"
+      : lastTurn?.status === "Resolved" || anyResolved
+        ? "Resolved"
+        : unresolvedHits.length > resolvedHits.length
+          ? "Unresolved"
+          : resolvedHits.length > 0
+            ? "Resolved"
+            : "Unclear";
+  const followUp = {
+    needsFollowUp: resolutionStatus !== "Resolved",
+    lastSpeaker: lastTurn?.role ?? ("customer" as TurnRole),
+    finalStatus: resolutionStatus,
+    openPromises,
+  };
 
   // 4) keywords (simple TF, stopwords removed)
   const STOPWORDS = new Set([
@@ -1017,7 +1167,9 @@ export function analyzeText(raw: string): AnalysisResult {
       : urgency === "High" ||
           riskLevel === "High" ||
           (moneyMentioned && sentimentLabel === "Negative") ||
-          issueLabel === "Duplicate Payment"
+          issueLabel === "Duplicate Payment" ||
+          (resolutionStatus === "Unresolved" && (moneyMentioned || repeatContactHits >= 1 || ignoredSignals >= 1)) ||
+          followUp.openPromises.length > 0
         ? "High"
         : riskLevel === "Medium" ? "Medium" : "Low";
 
@@ -1033,7 +1185,13 @@ export function analyzeText(raw: string): AnalysisResult {
     complaint: { category, categoryScore, issue, issueLabel, priority },
     sentiment: { label: sentimentLabel, score: Math.round(sentimentScore * 10) / 10, emotion, urgency },
     keywords,
-    resolution: { status: resolutionStatus, signals: resolutionSignals.slice(0, 6) },
+    resolution: {
+      status: resolutionStatus,
+      signals: resolutionSignals.slice(0, 6),
+      turns,
+      turnAnalyses,
+      followUp,
+    },
     summary: { issue, customerRequest, actionsTaken, currentStatus },
     urgent: { isUrgent, reasons: urgentReasons, recommendedAction: urgentAction },
     security: {

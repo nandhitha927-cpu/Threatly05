@@ -421,6 +421,69 @@ export default function Dashboard() {
                       </p>
                       <p className="mt-1 text-sm leading-relaxed">{result.summary.customerRequest}</p>
                     </div>
+                    {result.resolution.turnAnalyses.length > 1 && (
+                      <div className="glass-inset rounded-xl p-4">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          Conversation timeline ({result.resolution.turnAnalyses.length} turns)
+                        </p>
+                        <div className="mt-2 grid gap-2">
+                          {result.resolution.turnAnalyses.map((t) => (
+                            <div
+                              key={t.index}
+                              className="flex items-start gap-2.5 rounded-lg border border-border/60 bg-background/40 p-2.5"
+                            >
+                              <Badge
+                                className={
+                                  t.role === "customer"
+                                    ? "shrink-0 border-blue-500/25 bg-blue-500/10 text-blue-700 shadow-none"
+                                    : t.role === "support"
+                                      ? "shrink-0 border-emerald-500/25 bg-emerald-500/10 text-emerald-700 shadow-none"
+                                      : "shrink-0 shadow-none"
+                                }
+                              >
+                                {t.role === "customer" ? "Customer" : t.role === "support" ? "Support" : "Unknown"}
+                              </Badge>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs leading-relaxed">{t.text}</p>
+                                {t.signals.length > 0 && (
+                                  <p className="mt-0.5 text-[11px] text-muted-foreground">{t.signals.join(" · ")}</p>
+                                )}
+                              </div>
+                              <Badge
+                                className={`shrink-0 border shadow-none ${
+                                  t.status === "Resolved"
+                                    ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700"
+                                    : t.status === "Unresolved"
+                                      ? "border-orange-500/25 bg-orange-500/10 text-orange-700"
+                                      : ""
+                                }`}
+                              >
+                                {t.status}
+                              </Badge>
+                            </div>
+                          ))}
+                        </div>
+                        {result.resolution.followUp.openPromises.length > 0 && (
+                          <div className="mt-3 rounded-lg border border-orange-500/25 bg-orange-500/5 p-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-orange-700">
+                              Unclosed support promises
+                            </p>
+                            <ul className="mt-1.5 list-inside list-disc text-xs text-muted-foreground">
+                              {result.resolution.followUp.openPromises.map((p) => (
+                                <li key={p}>“{p}”</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {result.resolution.followUp.needsFollowUp && (
+                          <p className="mt-2 text-xs font-medium text-orange-700">
+                            {result.resolution.followUp.lastSpeaker === "customer"
+                              ? "Conversation ends with the customer — follow-up recommended."
+                              : "Issue remains open — schedule a follow-up."}
+                          </p>
+                        )}
+                      </div>
+                    )}
                     {result.resolution.signals.length > 0 && (
                       <div className="glass-inset rounded-xl p-4">
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
