@@ -84,6 +84,24 @@ export interface MessageSummary {
   currentStatus: string | null;
 }
 
+/** Structured conversation summary (product spec §6). */
+export interface ConversationSummary {
+  /** one-line description of the core problem, e.g. "Customer was charged twice for an order." */
+  issue: string;
+  /** what the customer asked for, e.g. "Refund duplicate payment." */
+  customerRequest: string;
+  /** what support actually did along the thread */
+  actionsTaken: string[];
+  /** current state as of the end of the thread */
+  currentStatus: string;
+  /** summary-level priority (Medium unless escalated by urgent/threat signals) */
+  priority: Priority;
+  /** true when the thread was long enough for a real multi-message summary */
+  isMultiTurn: boolean;
+  /** number of turns the summary was built from */
+  turnCount: number;
+}
+
 export type TurnRole = "customer" | "support" | "unknown";
 
 export interface ConversationTurn {
@@ -143,6 +161,8 @@ export interface AnalysisResult {
     followUp: FollowUpInfo;
   };
   summary: MessageSummary;
+  /** spec §6 structured summary — computed via buildConversationSummary(turnAnalyses, ctx) */
+  conversationSummary?: ConversationSummary;
   urgent: {
     isUrgent: boolean;
     reasons: string[];
@@ -705,6 +725,170 @@ const TURN_SUPPORT_PROMISE_PATTERNS: RegExp[] = [
   /\b(as soon as possible|shortly|soon)\b/i,
   /\b(under (review|investigation)|escalated (?:to )?(?:the )?(?:team|department|concerned))\b/i,
 ];
+
+// ─── conversation summarization (spec §6) ────────────────────────────────
+
+/** Action phrases to look for in support turns, mapped to summary wording. */
+const SUPPORT_ACTION_PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
+  [
+    /\b(verified|confirmed|checked|reviewed)\s+(?:the\s+)?(transaction|payment|details|account|order|records?)/i,
+    (m) => `Verified the ${m[2].toLowerCase()}`,
+  ],
+  [
+    /\b(initiated|started|processed|issued|scheduled)\s+(?:the\s+)?(refund|return|replacement|reshipment|reissue)/i,
+    (m) => `Initiated the ${m[2].toLowerCase()}`,
+  ],
+  [
+    /\b(refunded|credited)\b/i,
+    () => "Refunded the amount",
+  ],
+  [
+    /\bescalat(?:ed|ing)\b[^.!?]{0,40}/i,
+    () => "Escalated to the concerned team",
+  ],
+  [
+    /\b(?:we\s+(?:are|'re)|currently)\s+(?:currently\s+)?(checking|looking into|investigating)/i,
+    (m) => `Investigating the issue (${m[1].toLowerCase()})`,
+  ],
+  [
+    /\b(?:we|i)\s+(?:sincerely\s+)?(?:apologize|apologise|am sorry|are sorry)/i,
+    () => "Apologized for the inconvenience",
+  ],
+  [
+    /\b(?:sent|shared|provided)\s+(?:the\s+)?(tracking\s+(?:link|details)|invoice|receipt|steps)/i,
+    (m) => `Shared the ${m[1].toLowerCase()}`,
+  ],
+  [
+    /\b(reset|unlocked|restored|reactivated)\s+(?:the\s+)?(?:your\s+)?(account|password|access)/i,
+    (m) => `Reset the ${m[2].toLowerCase()}`,
+  ],
+];
+
+/** Customer-request phrases, mapped to summary wording. */
+const REQUEST_ACTION_PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
+  [
+    /\b(?:want|need|request(?:ing)?|demand(?:ing)?)\s+(?:a\s+|my\s+|the\s+)?(refund|money\s+back|reimbursement)/i,
+    (m) => `Refund the ${m[1].includes("refund") ? "duplicate payment" : m[1]}`.replace("Refund the money back", "Refund the payment"),
+  ],
+  [
+    /\b(?:cancel|cancellation\s+of)\s+(?:my\s+)?(subscription|order|plan|account)/i,
+    (m) => `Cancel the ${m[1].toLowerCase()}`,
+  ],
+  [
+    /\b(?:replace|replacement\s+for|exchange)\s+(?:my\s+|the\s+)?(product|item|device|unit|order)/i,
+    (m) => `Replace the ${m[1].toLowerCase()}`,
+  ],
+  [
+    /\b(?:fix|repair|resolve)\s+(?:my\s+|the\s+)?(issue|problem|device|product|app|login|account)/i,
+    (m) => `Fix the ${m[1].toLowerCase()}`,
+  ],
+  [
+    /\b(?:recover|regain|access)\s+(?:my\s+)?(account|access)/i,
+    (m) => `Restore the ${m[1].toLowerCase()}`,
+  ],
+];
+
+function clip(s: string, n: number): string {
+  return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
+}
+
+function firstSentenceOf(s: string): string {
+  return (s.split(/(?<=[.!?])\s+/)[0] ?? s).trim();
+}
+
+/**
+ * Build a structured, manager-ready summary from the analyzed turns —
+ * extractive (no LLM): issue from the first substantive customer turn,
+ * request from customer asks, actions from support verbs, status from the
+ * thread's end state.
+ */
+export function buildConversationSummary(
+  turnAnalyses: TurnAnalysis[],
+  ctx: {
+    resolutionStatus: "Resolved" | "Unresolved" | "Unclear";
+    openPromises: string[];
+    isUrgent: boolean;
+    urgency: Priority;
+    riskLevel: RiskLevel;
+    fallbackIssue: string;
+    fallbackRequest: string;
+  },
+): ConversationSummary {
+  const customerTurns = turnAnalyses.filter((t) => t.role === "customer");
+  const supportTurns = turnAnalyses.filter((t) => t.role === "support");
+  const isMultiTurn = turnAnalyses.length >= 4 && customerTurns.length >= 2 && supportTurns.length >= 1;
+
+  // Issue: first customer turn with complaint content
+  const issueSource =
+    customerTurns.find((t) => t.text.length > 25) ?? customerTurns[0] ?? turnAnalyses[0];
+  const issue = clip(firstSentenceOf(issueSource?.text ?? ctx.fallbackIssue) || ctx.fallbackIssue, 160);
+
+  // Customer request: strongest ask across customer turns
+  let customerRequest = ctx.fallbackRequest;
+  outer: for (const t of customerTurns) {
+    for (const [re, fmt] of REQUEST_ACTION_PATTERNS) {
+      const m = t.text.match(re);
+      if (m) {
+        customerRequest = clip(fmt(m), 120);
+        break outer;
+      }
+    }
+  }
+
+  // Actions taken: unique support actions in conversation order
+  const actions: string[] = [];
+  for (const t of supportTurns) {
+    for (const [re, fmt] of SUPPORT_ACTION_PATTERNS) {
+      const m = t.text.match(re);
+      if (m) {
+        const action = fmt(m);
+        if (!actions.includes(action)) actions.push(action);
+      }
+    }
+  }
+  if (actions.length === 0 && supportTurns.length > 0) {
+    actions.push("Acknowledged the issue");
+  }
+
+  // Current status
+  let currentStatus: string;
+  const actionsJoined = actions.join(" ").toLowerCase();
+  if (ctx.resolutionStatus === "Resolved") {
+    currentStatus = "Resolved";
+  } else if (/initiated the refund|refunded/.test(actionsJoined)) {
+    currentStatus = "Refund pending";
+  } else if (ctx.openPromises.length > 0) {
+    const promise = ctx.openPromises.join(" ").toLowerCase();
+    if (/refund|money/.test(promise)) currentStatus = "Refund pending";
+    else if (/check|looking|investigat/.test(promise)) currentStatus = "Verification in progress";
+    else if (/escalat/.test(promise)) currentStatus = "Escalated — awaiting response";
+    else currentStatus = "Awaiting support follow-up";
+  } else if (ctx.resolutionStatus === "Unresolved") {
+    currentStatus = "Unresolved — awaiting response";
+  } else {
+    currentStatus = "Needs review";
+  }
+
+  // Summary-level priority
+  const priority: Priority =
+    ctx.isUrgent || ctx.riskLevel === "Critical"
+      ? "Critical"
+      : ctx.riskLevel === "High" || ctx.urgency === "Critical"
+        ? "High"
+        : ctx.resolutionStatus === "Unresolved" || ctx.urgency === "High"
+          ? "Medium"
+          : "Low";
+
+  return {
+    issue,
+    customerRequest,
+    actionsTaken: actions,
+    currentStatus,
+    priority,
+    isMultiTurn,
+    turnCount: turnAnalyses.length,
+  };
+}
 
 /**
  * Analyze resolution state of a single turn. Support "checking"-type replies

@@ -42,11 +42,38 @@ import { useNavigate } from "react-router";
 import {
   analyzeText,
   aggregateIssues,
+  buildConversationSummary,
   SAMPLE_EMAILS,
   type AnalysisResult,
   type TrendRow,
 } from "@/lib/analyzer";
 import { generateSampleCorpus } from "@/lib/sample-corpus";
+
+/** Spec §6 demo: a long 24-message support thread. */
+const DEMO_THREAD = `Customer: Hi, I was charged twice for my order #88213 this month. The amount ₹1,299 was deducted two times.
+Support: Hello! Sorry for the trouble. Let me check your payment records right away.
+Customer: It's the second time this has happened. Please refund the duplicate payment.
+Support: I have verified the transaction and I can confirm two payments of ₹1,299 were taken for the same order.
+Customer: Good. So when will I get my money back?
+Support: We are checking with the payment gateway on why the charge went through twice.
+Customer: This is frustrating, I have been waiting.
+Support: I sincerely apologize for the inconvenience. I have initiated the refund for the duplicate transaction.
+Customer: Okay, how long will the refund take?
+Support: The refund will be processed within 5-7 business days. You will receive a confirmation email.
+Customer: Fine. Also please make sure this doesn't happen again.
+Support: Absolutely, we have escalated the duplicate-charge case to the billing team to review the root cause.
+Customer: I still haven't received any confirmation email.
+Support: Let me share the refund reference number with you right now.
+Customer: Yes please.
+Support: Here it is: RFND-88213-AX. Please keep it for tracking.
+Customer: Thanks. And the escalation?
+Support: The billing team is looking into it and will get back to you within 48 hours.
+Customer: Alright. I will wait for the refund then.
+Support: Is there anything else I can help you with today?
+Customer: No, that's all for now.
+Support: Thank you for your patience. Have a great day!
+Customer: Thanks, bye.
+Support: Bye! Take care.`;
 
 const riskStyles: Record<string, string> = {
   Low: "bg-emerald-500/10 text-emerald-700 border-emerald-500/25",
@@ -198,6 +225,20 @@ export default function Dashboard() {
   const trends = useMemo(() => aggregateIssues(corpus), [corpus]);
   const maxTrendCount = trends[0]?.count ?? 1;
 
+  // Spec §6: structured summary for the latest result
+  const convSummary = useMemo(() => {
+    if (!result) return null;
+    return buildConversationSummary(result.resolution.turnAnalyses, {
+      resolutionStatus: result.resolution.status,
+      openPromises: result.resolution.followUp.openPromises,
+      isUrgent: result.urgent.isUrgent,
+      urgency: result.sentiment.urgency,
+      riskLevel: result.security.riskLevel,
+      fallbackIssue: result.summary.issue,
+      fallbackRequest: result.summary.customerRequest,
+    });
+  }, [result]);
+
   const runDemoBatch = () => {
     const corpusResults = generateSampleCorpus(500);
     setBatch(corpusResults);
@@ -248,7 +289,7 @@ export default function Dashboard() {
                 </CardDescription>
               </div>
               <div className="flex flex-wrap gap-1.5">
-                {SAMPLE_EMAILS.map((s) => (
+                {[...SAMPLE_EMAILS, { label: "Long thread: duplicate charge (summary demo)", text: DEMO_THREAD }].map((s) => (
                   <Button
                     key={s.label}
                     type="button"
@@ -334,6 +375,56 @@ export default function Dashboard() {
                 ))}
               </div>
             </div>
+
+            {/* Spec §6: conversation summary */}
+            {convSummary && convSummary.isMultiTurn && (
+              <Card className="glass-panel border-white/70 shadow-none">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+                    <Sparkles className="size-4 text-blue-600" />
+                    Conversation summary
+                  </CardTitle>
+                  <CardDescription>
+                    Manager view — built from {convSummary.turnCount} turns, no need to read the full thread.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-3">
+                  <div className="glass-inset rounded-xl p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Issue</p>
+                    <p className="mt-1 text-sm leading-relaxed">{convSummary.issue}</p>
+                  </div>
+                  <div className="glass-inset rounded-xl p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Customer request</p>
+                    <p className="mt-1 text-sm leading-relaxed">{convSummary.customerRequest}</p>
+                  </div>
+                  <div className="glass-inset rounded-xl p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Actions taken</p>
+                    {convSummary.actionsTaken.length > 0 ? (
+                      <ul className="mt-1.5 list-inside list-disc text-sm text-muted-foreground">
+                        {convSummary.actionsTaken.map((a) => (
+                          <li key={a}>{a}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-1 text-sm text-muted-foreground">None recorded yet</p>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge className={`border shadow-none ${riskStyles[convSummary.priority]}`}>
+                      Priority: {convSummary.priority}
+                    </Badge>
+                    <Badge variant="secondary" className="shadow-none">
+                      Status: {convSummary.currentStatus}
+                    </Badge>
+                  </div>
+                </CardContent>
+                {result.security.hasThreat && result.urgent.isUrgent && (
+                  <p className="px-6 pb-5 text-xs text-muted-foreground">
+                    Note: security/urgent signals from the full analysis escalate the handling of this thread.
+                  </p>
+                  )}
+              </Card>
+            )}
 
             {/* Stats */}
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
