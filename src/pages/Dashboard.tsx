@@ -58,7 +58,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import {
   analyzeText,
   aggregateIssues,
@@ -285,7 +285,7 @@ export default function Dashboard() {
       {/* Header */}
       <header className="sticky top-0 z-20 border-b border-border/60 bg-background/70 backdrop-blur-xl">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-3.5">
-          <div className="flex items-center gap-2.5">
+          <Link to="/" className="flex items-center gap-2.5 rounded-lg px-1 py-0.5 transition-colors hover:bg-background/60" title={t.home}>
             <div className="flex size-8 items-center justify-center rounded-lg bg-blue-600/10 text-blue-700 dark:text-blue-300">
               <ShieldCheck className="size-4" />
             </div>
@@ -296,7 +296,7 @@ export default function Dashboard() {
                 {threatCount > 0 ? ` · ${threatCount} ${t.threats}` : ""}
               </p>
             </div>
-          </div>
+          </Link>
           <div className="flex items-center gap-2">
             <div className="flex rounded-lg border border-border/70 bg-background/50 p-0.5">
               <Button

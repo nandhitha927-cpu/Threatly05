@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { Link } from "react-router";
 import { useLang } from "@/hooks/use-lang";
 import logo from "@/assets/logo.svg";
 
@@ -76,8 +77,10 @@ export default function Landing() {
 
       <header className="relative z-10 mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6">
         <div className="flex items-center gap-2.5">
-          <img src={logo} alt="Threatly logo" className="size-9 rounded-lg" />
-          <span className="text-lg font-semibold tracking-tight">Threatly</span>
+          <Link to="/" className="flex items-center gap-2.5" title={t.home}>
+            <img src={logo} alt="Threatly logo" className="size-9 rounded-lg" />
+            <span className="text-lg font-semibold tracking-tight">Threatly</span>
+          </Link>
         </div>
         <nav className="flex items-center gap-2">
           <ThemeToggle />

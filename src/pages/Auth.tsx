@@ -112,7 +112,14 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <div className="flex justify-end p-4">
+      <div className="flex items-center justify-between p-4">
+        <a
+          href="/"
+          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground"
+        >
+          <ArrowRight className="size-4 rotate-180" />
+          Home
+        </a>
         <ThemeToggle />
       </div>
       {/* Auth Content */}

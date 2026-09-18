@@ -11,6 +11,7 @@ export type UIStrings = {
   analytics: string;
   settings: string;
   signOut: string;
+  home: string;
   analyzedCount: string;
   threats: string;
   settingsTitle: string;
@@ -41,6 +42,7 @@ const en: UIStrings = {
   analytics: "Analytics",
   settings: "Settings",
   signOut: "Sign out",
+  home: "Back to home",
   analyzedCount: "analyzed",
   threats: "threats",
   settingsTitle: "Settings",
@@ -76,6 +78,7 @@ const es: UIStrings = {
   analytics: "Analítica",
   settings: "Ajustes",
   signOut: "Cerrar sesión",
+  home: "Volver al inicio",
   analyzedCount: "analizados",
   threats: "amenazas",
   settingsTitle: "Ajustes",
@@ -110,6 +113,7 @@ const fr: UIStrings = {
   analytics: "Analytique",
   settings: "Paramètres",
   signOut: "Se déconnecter",
+  home: "Retour à l'accueil",
   analyzedCount: "analysés",
   threats: "menaces",
   settingsTitle: "Paramètres",
@@ -144,6 +148,7 @@ const de: UIStrings = {
   analytics: "Analytik",
   settings: "Einstellungen",
   signOut: "Abmelden",
+  home: "Zur Startseite",
   analyzedCount: "analysiert",
   threats: "Bedrohungen",
   settingsTitle: "Einstellungen",
@@ -179,6 +184,7 @@ const pt: UIStrings = {
   analytics: "Análises",
   settings: "Configurações",
   signOut: "Sair",
+  home: "Voltar ao início",
   analyzedCount: "analisadas",
   threats: "ameaças",
   settingsTitle: "Configurações",
@@ -213,6 +219,7 @@ const hi: UIStrings = {
   analytics: "विश्लेषण",
   settings: "सेटिंग्स",
   signOut: "साइन आउट",
+  home: "होम पर जाएं",
   analyzedCount: "विश्लेषित",
   threats: "ख़तरे",
   settingsTitle: "सेटिंग्स",
@@ -246,6 +253,7 @@ const ml: UIStrings = {
   analytics: "അനലിറ്റിക്സ്",
   settings: "സെറ്റിംഗ്സ്",
   signOut: "സൈൻ ഔട്ട്",
+  home: "ഹോമിലേക്ക്",
   analyzedCount: "വിശ്ലേഷിച്ചു",
   threats: "ഭീഷണികൾ",
   settingsTitle: "സെറ്റിംഗ്സ്",
