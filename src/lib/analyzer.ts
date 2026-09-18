@@ -110,6 +110,11 @@ export interface AnalysisResult {
     signals: string[];
   };
   summary: MessageSummary;
+  urgent: {
+    isUrgent: boolean;
+    reasons: string[];
+    recommendedAction: string;
+  };
   security: {
     hasThreat: boolean;
     riskLevel: RiskLevel;
@@ -599,7 +604,7 @@ const POSITIVE_WORDS = [
 ];
 const URGENT_WORDS = [
   "urgent", "asap", "immediately", "right now", "emergency", "critical",
-  "as soon as possible", "today", "hours", "escalate",
+  "as soon as possible", "today", "escalate",
 ];
 const RESOLVED_MARKERS = [
   "resolved", "solved", "fixed", "closed", "completed", "all good",
@@ -652,6 +657,57 @@ const ISSUE_LABEL_RULES: [RegExp, string][] = [
     /\bovercharged?\b|\bwrong (amount|price)\b|\bbilling (error|issue|problem)\b/i,
     "Billing Dispute",
   ],
+  [
+    /\bsomeone (?:else )?(?:has |have |had )?(?:accessed|logged (?:in)? ?(?:into)?|used|transferred)\b|\bwithout (?:my |the )?permission\b/i,
+    "Unauthorized Access",
+  ],
+];
+
+/**
+ * Urgent-complaint rules (product spec §4): conversations that must skip the
+ * normal queue. Each carries its own recommended action.
+ */
+const URGENT_RULES: { reason: string; pattern: RegExp; action: string }[] = [
+  {
+    reason: "Account compromise",
+    pattern: /\b(account (?:has been |was |is )?(?:compromised|hacked|breached|taken over)|someone (?:else )?(?:has |have |had )?(?:accessed|logged into|used|transferred)|unauthorized (?:access|login)|logged in (?:someone|from an unknown device))\b/i,
+    action: "Immediate security investigation — lock affected credentials and audit recent activity.",
+  },
+  {
+    reason: "Financial loss",
+    pattern: /\b(lost|lost out|out of pocket|drained|withdrew|transferred)\b[^.!?]{0,40}\b(money|funds|amount|balance|savings)\b/i,
+    action: "Immediate security investigation — freeze related transactions and start the payment-recall process.",
+  },
+  {
+    reason: "Fraud",
+    pattern: /\b(fraud|fraudulent|scam(?:med)?|stolen (?:card|money|funds|identity)|identity theft|phishing (?:attack|scam))\b/i,
+    action: "Immediate security investigation — escalate to the fraud team and preserve evidence.",
+  },
+  {
+    reason: "Security incident",
+    pattern: /\b(data breach|security (?:incident|breach|alert)|suspicious (?:activity|login|transaction)|malware|ransomware)\b/i,
+    action: "Immediate security investigation — involve the incident-response team.",
+  },
+  {
+    reason: "Threat of legal action",
+    pattern: /\b(lawyer|attorney|legal action|sue|suing|court|consumer (?:court|commission|protection)|regulatory complaint)\b/i,
+    action: "Route to legal/compliance review before any further reply is sent.",
+  },
+  {
+    reason: "Sensitive data exposure",
+    pattern: /\b(card (?:number|details)|cvv|ssn|social security|bank (?:account|details)|personal (?:data|information|details))\b[^.!?]{0,60}\b(leaked|exposed|stolen|shared|visible|public)\b/i,
+    action: "Immediate security investigation — assess data-exposure scope and notify the DPO.",
+  },
+  {
+    reason: "Service outage",
+    pattern: /\b(outage|(?:app|site|website|service|server|api|platform|system) (?:is |was )?(?:completely )?down|(?:site|service|platform) is unavailable|cannot access (?:anything|the (?:app|site|service)))\b/i,
+    action: "Notify the on-call engineering/ops team and confirm incident status before replying.",
+  },
+  {
+    reason: "Repeated unresolved complaint",
+    pattern: /\b(?:third|fourth|fifth|3rd|4th|5th) time\b|\b(?:multiple|several|countless|repeated)\s+(?:times|tickets|emails|calls|attempts|complaints)\b[^.!?]{0,60}\b(?:no|without)\s+(?:solution|resolution|response|reply|help)\b/i,
+    action: "Escalate to a senior agent — repeated unresolved contact is a churn and compliance risk.",
+  },
 ];
 
 export function analyzeText(raw: string): AnalysisResult {
@@ -689,6 +745,17 @@ export function analyzeText(raw: string): AnalysisResult {
     (category === "Refund Request" || category === "Payment / Transaction" || category === "Subscription Issue")
   ) {
     category = "Billing Problem";
+  }
+
+  // spec §4 example: "someone has accessed my account" → Account Security/Fraud
+  const unauthorizedAccess =
+    /\bsomeone (?:else )?(?:has |have |had )?(?:accessed|logged (?:in)? ?(?:into)?|used|transferred)\b/i.test(text) ||
+    /\bwithout (?:my |the )?permission\b/i.test(text);
+  if (
+    unauthorizedAccess &&
+    (category === "Other" || category === "Account / Login" || category === "Payment / Transaction")
+  ) {
+    category = "Security Concern";
   }
 
   // short issue tag, e.g. "Duplicate Payment", "Login Failure"
@@ -897,6 +964,27 @@ export function analyzeText(raw: string): AnalysisResult {
 
   const hasThreat = riskLevel !== "Low";
 
+  // 6b) urgent-complaint detection (spec §4)
+  const urgentReasons: string[] = [];
+  const urgentActions: string[] = [];
+  for (const rule of URGENT_RULES) {
+    if (rule.pattern.test(text)) {
+      urgentReasons.push(rule.reason);
+      urgentActions.push(rule.action);
+    }
+  }
+  // repeated unresolved complaint: sentiment/urgency-driven rule
+  if (
+    urgency === "High" &&
+    resolutionStatus === "Unresolved" &&
+    repeatContactHits + ignoredSignals >= 2
+  ) {
+    urgentReasons.push("Repeated unresolved complaint");
+    urgentActions.push("Escalate to a senior agent — repeated unresolved contact is a churn and compliance risk.");
+  }
+  const isUrgent = urgentReasons.length > 0;
+  const urgentAction = isUrgent ? urgentActions[0] : "";
+
   // 7) summary
   const firstSentence = text.split(/(?<=[.!?])\s+/)[0]?.trim() ?? text.slice(0, 140);
   const issue = firstSentence.length > 160 ? `${firstSentence.slice(0, 157)}…` : firstSentence;
@@ -921,7 +1009,10 @@ export function analyzeText(raw: string): AnalysisResult {
   const currentStatus = resolutionStatus === "Unresolved" ? "Awaiting resolution" : resolutionStatus === "Resolved" ? "Reported resolved" : "Needs review";
 
   const priority: Priority =
-    urgency === "Critical" || riskLevel === "Critical" || compromiseSignals >= 1
+    isUrgent ||
+    urgency === "Critical" ||
+    riskLevel === "Critical" ||
+    compromiseSignals >= 1
       ? "Critical"
       : urgency === "High" ||
           riskLevel === "High" ||
@@ -944,6 +1035,7 @@ export function analyzeText(raw: string): AnalysisResult {
     keywords,
     resolution: { status: resolutionStatus, signals: resolutionSignals.slice(0, 6) },
     summary: { issue, customerRequest, actionsTaken, currentStatus },
+    urgent: { isUrgent, reasons: urgentReasons, recommendedAction: urgentAction },
     security: {
       hasThreat,
       riskLevel,
@@ -1013,6 +1105,10 @@ Sincerely, Security Department`,
   {
     label: "Attachment-based phishing",
     text: `Hi team, please review the attached invoice_2024.zip and confirm payment today. Details are in invoice_2024.zip — if you cannot open it, enable macros in the docm file. Thanks, billing@paypa1-secure.example`,
+  },
+  {
+    label: "Urgent: account takeover",
+    text: `Someone has accessed my account and transferred ₹25,000 without my permission. I need help immediately.`,
   },
   {
     label: "Delivery issue (benign)",

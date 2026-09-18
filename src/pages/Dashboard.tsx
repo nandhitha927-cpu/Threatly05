@@ -393,6 +393,22 @@ export default function Dashboard() {
                   </TabsList>
 
                   <TabsContent value="summary" className="mt-4 grid gap-3">
+                    {result.urgent.isUrgent && (
+                      <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4">
+                        <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-red-700">
+                          <ShieldAlert className="size-3.5" />
+                          Requires immediate attention
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {result.urgent.reasons.map((reason) => (
+                            <Badge key={reason} className="border-red-500/25 bg-red-500/10 text-red-700 shadow-none">
+                              {reason}
+                            </Badge>
+                          ))}
+                        </div>
+                        <p className="mt-2 text-sm text-foreground/90">{result.urgent.recommendedAction}</p>
+                      </div>
+                    )}
                     <div className="glass-inset rounded-xl p-4">
                       <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                         Issue
@@ -611,6 +627,7 @@ export default function Dashboard() {
                     <TableHead>Sentiment</TableHead>
                     <TableHead>Priority</TableHead>
                     <TableHead>Risk</TableHead>
+                    <TableHead className="hidden sm:table-cell">Urgent</TableHead>
                     <TableHead className="hidden sm:table-cell">Keywords</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -626,6 +643,15 @@ export default function Dashboard() {
                         <Badge className={`border shadow-none ${riskStyles[h.security.riskLevel]}`}>
                           {h.security.riskLevel}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="hidden sm:table-cell">
+                        {h.urgent.isUrgent ? (
+                          <Badge className="border-red-500/25 bg-red-500/10 text-red-700 shadow-none">
+                            ⚡ {h.urgent.reasons[0]}
+                          </Badge>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
                       </TableCell>
                       <TableCell className="hidden text-xs text-muted-foreground sm:table-cell">
                         {h.keywords.slice(0, 4).join(", ")}
