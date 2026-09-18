@@ -63,11 +63,17 @@ export interface UrlFinding {
 
 export interface EmailFinding {
   email: string;
+  /** display name from "Name <user@host>" syntax, if present */
+  displayName: string | null;
+  /** does the display name itself claim a known brand? */
+  displayNameImpersonates: string | null;
   domain: string;
   isFreeMail: boolean;
   lookalikeBrand: string | null;
   lookalikeChars: string[];
   domainMismatch: boolean;
+  /** why this sender was rated — mirrors the spec's "Reason" output */
+  reason: string;
   flags: string[];
   risk: "low" | "medium" | "high" | "critical";
 }
@@ -192,6 +198,8 @@ export interface AnalysisResult {
 
 const URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>"')\]]+/gi;
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
+/** "Display Name <user@host>" syntax */
+const EMAIL_WITH_NAME_RE = /([A-Za-z][A-Za-z0-9 .,'&-]{1,40}?)\s*<([A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)>/g;
 const MONEY_RE =
   /(?:[$€£₹]|USD|EUR|GBP|INR|NGN)\s?[\d,]+(?:\.\d{1,2})?(?:\s?(?:k|K|m|M|million|billion))?/g;
 const ATTACHMENT_RE =
@@ -425,15 +433,41 @@ export function parseUrl(raw: string): UrlFinding {
   };
 }
 
-/** Parse an email address into structured findings. */
-export function parseEmail(raw: string): EmailFinding {
-  const email = raw.toLowerCase();
+/**
+ * Parse an email address (optionally with "Name <user@host>" display syntax)
+ * into structured findings. `expectedDomain` — when the analyst provides the
+ * organization's real domain — enables the spec's domain-mismatch comparison.
+ */
+export function parseEmail(raw: string, expectedDomain?: string): EmailFinding {
+  const withName = raw.match(/^(.*?)\s*<\s*([^>]+)\s*>\s*$/);
+  const displayName = withName ? withName[1].trim().replace(/^["']|["']$/g, "") : null;
+  const address = (withName ? withName[2] : raw).trim().toLowerCase();
+  const email = address;
   const domain = email.split("@")[1] ?? "";
   const flags: string[] = [];
   let risk: EmailFinding["risk"] = "low";
 
   const isFree = FREE_MAIL.has(domain);
   if (isFree) flags.push("Free-mail domain — anyone can register it");
+
+  // display-name impersonation: name claims a brand the domain doesn't belong to
+  let displayNameImpersonates: string | null = null;
+  if (displayName) {
+    for (const [brand] of BRANDS) {
+      const b = brand.replace(/\s/g, "");
+      if (
+        displayName.toLowerCase().replace(/\s/g, "").includes(b) &&
+        !domain.includes(b)
+      ) {
+        displayNameImpersonates = brand;
+        break;
+      }
+    }
+    if (displayNameImpersonates) {
+      flags.push(`Display name claims "${displayNameImpersonates}" but the domain is unrelated`);
+      risk = risk === "low" ? "high" : risk;
+    }
+  }
 
   let lookalikeBrand: string | null = null;
   let lookalikeChars: string[] = [];
@@ -495,13 +529,39 @@ export function parseEmail(raw: string): EmailFinding {
     }
   }
 
+  // spec §8: compare against the expected organization domain
+  const expected = expectedDomain?.trim().toLowerCase().replace(/^@/, "");
+  const orgMismatch =
+    !!expected && domain !== expected && !domain.endsWith(`.${expected}`);
+
+  // build the spec-style reason
+  let reason: string;
+  if (lookalikeBrand) {
+    reason = `Domain impersonates "${lookalikeBrand}" via lookalike characters.`;
+  } else if (displayNameImpersonates) {
+    reason = `Display name claims "${displayNameImpersonates}" but the sending domain does not match.`;
+  } else if (orgMismatch) {
+    reason = `Domain does not match the expected organization domain "${expected}".`;
+  } else if (isFree) {
+    reason = "Free-mail domain — sender cannot be attributed to your organization.";
+  } else {
+    reason = "No impersonation signals — domain looks consistent.";
+  }
+  if (orgMismatch) {
+    flags.push(`Domain mismatch vs expected "${expected}"`);
+    risk = risk === "low" ? "high" : risk;
+  }
+
   return {
     email,
+    displayName,
+    displayNameImpersonates,
     domain,
     isFreeMail: isFree,
     lookalikeBrand,
     lookalikeChars,
-    domainMismatch: isFree && !lookalikeBrand,
+    domainMismatch: (isFree && !lookalikeBrand) || orgMismatch,
+    reason,
     flags,
     risk,
   };
@@ -1048,13 +1108,22 @@ const URGENT_RULES: { reason: string; pattern: RegExp; action: string }[] = [
   },
 ];
 
-export function analyzeText(raw: string): AnalysisResult {
+export function analyzeText(raw: string, options?: { expectedDomain?: string }): AnalysisResult {
   const text = raw.trim();
   const lower = text.toLowerCase();
 
   // URLs / emails / money / attachments
   const urls = uniq(text.match(URL_RE) ?? []).map((m) => parseUrl(m));
-  const emails = uniq(text.match(EMAIL_RE) ?? []).map((m) => parseEmail(m));
+  // capture "Name <user@host>" pairs first, then bare addresses
+  const namePairs = uniq(
+    Array.from(text.matchAll(EMAIL_WITH_NAME_RE)).map((m) => `${m[1].trim()} <${m[2]}>`),
+  );
+  const bareEmails = uniq(text.match(EMAIL_RE) ?? []).filter(
+    (e) => !namePairs.some((p) => p.toLowerCase().includes(e.toLowerCase())),
+  );
+  const emails = [...namePairs, ...bareEmails].map((m) =>
+    parseEmail(m, options?.expectedDomain),
+  );
   const attachments = uniq(text.match(ATTACHMENT_RE) ?? []).map((m) => parseAttachment(m));
   const amounts = uniq(text.match(MONEY_RE) ?? []);
   const moneyMentioned = amounts.length > 0;

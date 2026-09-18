@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -195,13 +196,16 @@ export default function Dashboard() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const [input, setInput] = useState("");
+  const [expectedDomain, setExpectedDomain] = useState("");
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [history, setHistory] = useState<AnalysisResult[]>([]);
   const [batch, setBatch] = useState<AnalysisResult[] | null>(null);
 
   const analyze = () => {
     if (!input.trim()) return;
-    const r = analyzeText(input);
+    const r = analyzeText(input, {
+      expectedDomain: expectedDomain.trim() || undefined,
+    });
     setResult(r);
     setHistory((h) => [r, ...h].slice(0, 25));
   };
@@ -312,6 +316,13 @@ export default function Dashboard() {
               className="min-h-40 resize-y border-border/70 bg-white/60 text-sm"
             />
             <div className="flex flex-wrap items-center gap-2">
+              <Input
+                type="text"
+                value={expectedDomain}
+                onChange={(e) => setExpectedDomain(e.target.value)}
+                placeholder="Your org domain (e.g. acme.com) — improves sender checks"
+                className="h-9 max-w-xs border-border/70 bg-white/60 text-xs"
+              />
               <Button type="button" onClick={analyze} disabled={!input.trim()} className="gap-2">
                 <ScanSearch className="size-4" />
                 Analyze message
@@ -690,14 +701,68 @@ export default function Dashboard() {
                       <p className="text-sm text-muted-foreground">No email addresses found.</p>
                     ) : (
                       result.security.emails.map((e) => (
-                        <FindingRow
-                          key={e.email}
-                          icon={AtSign}
-                          title={e.email}
-                          sub={`Domain: ${e.domain}${e.lookalikeBrand ? ` · impersonates ${e.lookalikeBrand}` : ""}`}
-                          risk={e.risk}
-                          flags={e.flags}
-                        />
+                        <div key={e.email} className="rounded-xl border border-border/70 p-3.5">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex min-w-0 items-start gap-3">
+                              <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground/80">
+                                <AtSign className="size-4" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="break-all text-sm font-medium text-foreground">
+                                  {e.displayName ? `${e.displayName} <${e.email}>` : e.email}
+                                </p>
+                                <p className="text-xs text-muted-foreground">Domain: {e.domain}</p>
+                              </div>
+                            </div>
+                            <Badge className={`shrink-0 border font-semibold shadow-none ${riskStyles[e.risk] ?? riskStyles.Low}`}>
+                              {e.risk}
+                            </Badge>
+                          </div>
+                          <p className="mt-2 text-xs text-foreground/80">
+                            <span className="font-semibold">Risk indicator: </span>
+                            {e.risk === "low"
+                              ? "No impersonation signals"
+                              : e.lookalikeBrand
+                                ? "Potential impersonation"
+                                : e.displayNameImpersonates
+                                  ? "Potential impersonation (display name)"
+                                  : "Potential mismatch"}
+                          </p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">Reason: {e.reason}</p>
+                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                            <span>
+                              <span className="text-muted-foreground">Free-mail: </span>
+                              <span className={e.isFreeMail ? "font-semibold text-orange-700" : "font-mono"}>
+                                {e.isFreeMail ? "Yes" : "No"}
+                              </span>
+                            </span>
+                            <span>
+                              <span className="text-muted-foreground">Lookalike chars: </span>
+                              <span className="font-mono">
+                                {e.lookalikeChars.length > 0 ? e.lookalikeChars.join(" ") : "—"}
+                              </span>
+                            </span>
+                            <span>
+                              <span className="text-muted-foreground">Domain mismatch: </span>
+                              <span className={e.domainMismatch ? "font-semibold text-red-700" : "font-mono"}>
+                                {e.domainMismatch ? "Yes" : "No"}
+                              </span>
+                            </span>
+                            {expectedDomain && (
+                              <span>
+                                <span className="text-muted-foreground">Expected org domain: </span>
+                                <span className="font-mono">{expectedDomain}</span>
+                              </span>
+                            )}
+                          </div>
+                          {e.flags.length > 0 && (
+                            <ul className="mt-2 list-inside list-disc text-xs text-muted-foreground">
+                              {e.flags.map((f) => (
+                                <li key={f}>{f}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
                       ))
                     )}
                   </TabsContent>
