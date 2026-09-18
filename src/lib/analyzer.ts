@@ -114,8 +114,9 @@ export interface AnalysisResult {
     riskLevel: RiskLevel;
     riskScore: number;
     threatTypes: string[];
-    socialEngineering: { technique: string; reason: string }[];
-    urls: UrlFinding[];
+  socialEngineering: { technique: string; reason: string }[];
+  phishingSignals: { signal: string; detail: string; weight: number }[];
+  urls: UrlFinding[];
     emails: EmailFinding[];
     attachments: AttachmentFinding[];
     credentialRequest: boolean;
@@ -172,6 +173,8 @@ const FREE_MAIL = new Set([
 const SUSPICIOUS_TLDS = new Set([
   "zip", "mov", "top", "gq", "tk", "ml", "cf", "work", "click", "country",
   "stream", "gdn", "mom", "xin", "kim", "men", "rest", "cam", "quest", "cfd",
+  "xyz", "icu", "buzz", "cyou", "sbs", "live", "shop", "online", "site",
+  "space", "fun", "monster", "lol", "baby", "promo",
 ]);
 
 const HOMOGLYPHS: Record<string, string> = {
@@ -187,6 +190,27 @@ function uniq<T>(arr: T[]): T[] {
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Small edit-distance used for fuzzy brand-impersonation matching. */
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  const m = a.length;
+  const n = b.length;
+  if (!m || !n) return m || n;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(
+        prev[j] + 1,
+        cur[j - 1] + 1,
+        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+    prev = cur;
+  }
+  return prev[n];
 }
 
 function countMatches(text: string, words: string[]): number {
@@ -223,8 +247,13 @@ export function parseUrl(raw: string): UrlFinding {
   const flags: string[] = [];
   let risk: UrlFinding["risk"] = "low";
 
+  const hasUserinfo = /\/\/[^/@]*@/.test(url);
+  const isPunycode = host.includes("xn--");
+
   if (!https) flags.push("No HTTPS — traffic is unencrypted");
   if (isIp) flags.push("Host is a raw IP address instead of a domain name");
+  if (hasUserinfo) flags.push("Uses the user@host trick — real host is hidden before the @");
+  if (isPunycode) flags.push("Punycode-encoded host — may visually mimic another domain");
   if (url.length > 100) flags.push(`Unusually long URL (${url.length} chars)`);
   if (SHORTENERS.has(registrableDomain)) flags.push("URL shortener hides the true destination");
 
@@ -260,10 +289,30 @@ export function parseUrl(raw: string): UrlFinding {
       }
     }
   }
+  if (!lookalikeBrand) {
+    // fuzzy edit-distance match on the registrable label (catches gooogle, paypall…)
+    const label = registrableDomain.split(".")[0];
+    if (label.length >= 4) {
+      for (const [brand] of BRANDS) {
+        const b = brand.replace(/\s/g, "");
+        const maxDist = b.length >= 6 ? 2 : 1;
+        if (
+          Math.abs(label.length - b.length) <= maxDist &&
+          levenshtein(label, b) <= maxDist
+        ) {
+          lookalikeBrand = brand;
+          lookalikeChars = [];
+          break;
+        }
+      }
+    }
+  }
   if (lookalikeBrand) {
     flags.push(`Lookalike / impersonation pattern for "${lookalikeBrand}"`);
     risk = "critical";
   }
+  if (hasUserinfo && risk === "low") risk = "high";
+  if (isPunycode && risk === "low") risk = "medium";
   if (isIp && risk === "low") risk = "medium";
   if (!https && risk === "low") risk = "medium";
   if (SHORTENERS.has(registrableDomain) && risk === "low") risk = "medium";
@@ -335,6 +384,25 @@ export function parseEmail(raw: string): EmailFinding {
   if (/^[0-9]+$/.test(email.split("@")[0])) {
     flags.push("Numeric local part — common in throwaway accounts");
     risk = risk === "low" ? "medium" : risk;
+  }
+  if (!lookalikeBrand) {
+    const label = domain.split(".")[0];
+    if (label.length >= 4) {
+      for (const [brand] of BRANDS) {
+        const b = brand.replace(/\s/g, "");
+        const maxDist = b.length >= 6 ? 2 : 1;
+        if (
+          Math.abs(label.length - b.length) <= maxDist &&
+          levenshtein(label, b) <= maxDist
+        ) {
+          lookalikeBrand = brand;
+          lookalikeChars = [];
+          flags.push(`Name similar to "${brand}" — likely impersonation`);
+          risk = "critical";
+          break;
+        }
+      }
+    }
   }
 
   return {
@@ -672,6 +740,45 @@ export function analyzeText(raw: string): AnalysisResult {
     techniques.add("lure");
   }
 
+  // 5b) generic phishing lures (score even when no brand impersonation is present)
+  const phishingSignals: { signal: string; detail: string; weight: number }[] = [];
+  const addSignal = (signal: string, detail: string, weight: number) => {
+    if (!phishingSignals.some((s) => s.signal === signal))
+      phishingSignals.push({ signal, detail, weight });
+  };
+
+  if (/\bdear\s+(customer|user|valued (customer|user|client))\b/i.test(text)) {
+    addSignal("Generic greeting", "Addresses 'Dear Customer' instead of your name — mass-phishing tell", 1);
+  }
+  if (/\b(unusual|suspicious)\s+(activity|login|sign[- ]?in|transaction|attempt)\b/i.test(text)) {
+    addSignal("Fake security warning", "Claims unusual or suspicious activity to trigger fear", 2);
+  }
+  if (
+    /\b(verify|confirm|validate|restore|secure|unlock)\b[^.!?]{0,30}\baccount\b/i.test(text) ||
+    /\baccount\b[^.!?]{0,30}\b(verify|confirm|validate|restore|secure|unlock)\b/i.test(text)
+  ) {
+    addSignal("Account-verification demand", "Asks you to verify or secure your account — a classic phishing request", 1.5);
+  }
+  if (/\b(update|confirm|submit)\b[^.!?]{0,30}\b(payment|billing|card)\s+(information|details|info)\b/i.test(text)) {
+    addSignal("Payment-detail update lure", "Requests updated payment or billing details via an untrusted message", 2);
+  }
+  if (
+    /\b(click|tap|select|go to)\b[^.!?]{0,20}\b(link|here|button|below)\b/i.test(text) &&
+    urls.length > 0
+  ) {
+    addSignal("Click-through demand", "Presses the reader to follow a link to complete the action", 1.5);
+  }
+  if (
+    /\b(within \d+ (hours|minutes)|access will be (limited|restricted)|account (has been|will be) (locked|limited|frozen))\b/i.test(text)
+  ) {
+    addSignal("Deadline / suspension threat", "Sets a short deadline or threatens restricted access", 2);
+  }
+
+  const phishingWeight = Math.min(
+    phishingSignals.reduce((sum, s) => sum + s.weight, 0),
+    9,
+  );
+
   const suspiciousUrls = urls.filter((u) => u.risk !== "low");
   const riskyAttachments = attachments.filter((a) => a.risk !== "low");
   const credentialRequest = /\b(enter|provide|confirm|share|reply with)\b[^.!?]*\b(password|username|pin|otp|card|credentials)\b/i.test(text);
@@ -691,6 +798,7 @@ export function analyzeText(raw: string): AnalysisResult {
   if (credentialRequest) riskScore += 4;
   if (otpRequest) riskScore += 3;
   riskScore += techniques.size * 1.2;
+  riskScore += phishingWeight;
   riskScore = Math.round(riskScore * 10) / 10;
 
   let riskLevel: RiskLevel = "Low";
@@ -706,6 +814,7 @@ export function analyzeText(raw: string): AnalysisResult {
   if (otpRequest) threatTypes.push("OTP request");
   if (techniques.has("redirection")) threatTypes.push("Payment redirection");
   if (riskyAttachments.length > 0) threatTypes.push("Malicious attachment");
+  if (phishingWeight >= 3) threatTypes.push("Phishing lure");
 
   const hasThreat = riskLevel !== "Low";
 
@@ -759,6 +868,7 @@ export function analyzeText(raw: string): AnalysisResult {
       riskScore,
       threatTypes,
       socialEngineering,
+      phishingSignals,
       urls,
       emails,
       attachments,
@@ -803,6 +913,16 @@ export const SAMPLE_EMAILS: { label: string; text: string }[] = [
     text: `URGENT! Your account has been compromised. Click this link immediately to secure your account and enter your username, password and OTP.
 Visit http://paypa1-security.example/login within 2 hours or your account will be permanently closed.
 Contact our support team at support@paypa1-security.example`,
+  },
+  {
+    label: "Phishing: bank lure (no lookalike)",
+    text: `Dear Customer,
+
+We detected unusual activity in your online banking account. For your protection, you must verify your account within 24 hours or access will be limited.
+
+Click here to confirm your payment details: http://account-secure-verify.xyz/login
+
+Sincerely, Security Department`,
   },
   {
     label: "Refund complaint (billing)",

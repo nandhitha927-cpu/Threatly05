@@ -327,6 +327,9 @@ export default function Dashboard() {
                     <TabsTrigger value="attachments">
                       Attachments ({result.security.attachments.length})
                     </TabsTrigger>
+                    <TabsTrigger value="phishing">
+                      Phishing ({result.security.phishingSignals.length})
+                    </TabsTrigger>
                     <TabsTrigger value="techniques">
                       Techniques ({result.security.socialEngineering.length})
                     </TabsTrigger>
@@ -420,6 +423,32 @@ export default function Dashboard() {
                           risk={a.risk}
                           flags={a.flags}
                         />
+                      ))
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="phishing" className="mt-4 grid gap-2.5">
+                    {result.security.phishingSignals.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No phishing lure signals detected in this message.
+                      </p>
+                    ) : (
+                      result.security.phishingSignals.map((s) => (
+                        <div
+                          key={s.signal}
+                          className="flex items-start gap-3 rounded-xl border border-red-500/25 bg-red-500/5 p-3.5"
+                        >
+                          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-red-600" />
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium">{s.signal}</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">{s.detail}</p>
+                          </div>
+                          <Badge
+                            className="ml-auto shrink-0 border-red-500/25 bg-red-500/10 text-red-700 shadow-none"
+                          >
+                            +{s.weight}
+                          </Badge>
+                        </div>
                       ))
                     )}
                   </TabsContent>
