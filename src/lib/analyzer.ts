@@ -1237,10 +1237,14 @@ export function tokenize(raw: string): string[] {
     .filter((w) => w.length > 2);
 }
 
-export function analyzeText(raw: string, options?: { expectedDomain?: string }): AnalysisResult {
+export function analyzeText(
+  raw: string,
+  options?: { expectedDomain?: string; uiLang?: SupportedLang },
+): AnalysisResult {
   const text = preprocess(raw);
   const lower = text.toLowerCase();
-  const lang: SupportedLang = detectLanguage(text);
+  // A fixed UI language (Settings) overrides per-message auto-detection.
+  const lang: SupportedLang = options?.uiLang ?? detectLanguage(text);
   const lex = LEXICONS[lang];
   const lexRxs = [
     ...Object.values(lex.categories).flat(),

@@ -18,6 +18,8 @@ import {
   TrendingUp,
   Layers,
   FileText,
+  Settings,
+  Languages,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +43,21 @@ import {
 } from "@/components/ui/table";
 import { useAuth } from "@/hooks/use-auth";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { useLang } from "@/hooks/use-lang";
+import {
+  LANG_LABELS,
+  langPrefLabel,
+  type LangPref,
+  type SupportedLang,
+} from "@/lib/languages";
+import type { UIStrings } from "@/lib/ui-strings";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useNavigate } from "react-router";
 import {
   analyzeText,
@@ -53,7 +70,6 @@ import {
 import { generateSampleCorpus } from "@/lib/sample-corpus";
 import { buildCombinedIntel } from "@/lib/combined-intel";
 import { conversationId } from "@/lib/analytics";
-import { LANG_LABELS } from "@/lib/analyzer";
 import AnalyticsView from "@/pages/AnalyticsView";
 
 /** Spec §6 demo: a long 24-message support thread. */
@@ -206,12 +222,14 @@ export default function Dashboard() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [history, setHistory] = useState<AnalysisResult[]>([]);
   const [batch, setBatch] = useState<AnalysisResult[] | null>(null);
-  const [view, setView] = useState<"console" | "analytics">("console");
+  const [view, setView] = useState<"console" | "analytics" | "settings">("console");
+  const { pref: langPref, setPrefAndPersist: setLangPref, uiLang, t } = useLang();
 
   const analyze = () => {
     if (!input.trim()) return;
     const r = analyzeText(input, {
       expectedDomain: expectedDomain.trim() || undefined,
+      uiLang: langPref === "auto" ? undefined : langPref,
     });
     setResult(r);
     setHistory((h) => [r, ...h].slice(0, 25));
@@ -268,10 +286,10 @@ export default function Dashboard() {
               <ShieldCheck className="size-4" />
             </div>
             <div>
-              <p className="text-sm font-semibold leading-tight">Threatly Console</p>
+              <p className="text-sm font-semibold leading-tight">{t.appName}</p>
               <p className="text-xs text-muted-foreground">
-                {user?.email ?? "Signed in"} · {history.length} analyzed
-                {threatCount > 0 ? ` · ${threatCount} threats` : ""}
+                {user?.email ?? "Signed in"} · {history.length} {t.analyzedCount}
+                {threatCount > 0 ? ` · ${threatCount} ${t.threats}` : ""}
               </p>
             </div>
           </div>
@@ -285,7 +303,7 @@ export default function Dashboard() {
                 onClick={() => setView("console")}
               >
                 <ScanSearch className="size-3.5" />
-                Console
+                {t.console}
               </Button>
               <Button
                 type="button"
@@ -295,7 +313,17 @@ export default function Dashboard() {
                 onClick={() => setView("analytics")}
               >
                 <TrendingUp className="size-3.5" />
-                Analytics
+                {t.analytics}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={view === "settings" ? "default" : "ghost"}
+                className="h-8 gap-1.5 rounded-md"
+                onClick={() => setView("settings")}
+              >
+                <Settings className="size-3.5" />
+                {t.settings}
               </Button>
             </div>
             <ThemeToggle />
@@ -306,15 +334,20 @@ export default function Dashboard() {
               onClick={handleSignOut}
             >
               <LogOut className="size-4" />
-              Sign out
+              {t.signOut}
             </Button>
           </div>
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto w-full max-w-6xl px-6 py-8">
-        {view === "analytics" ? (
+      <main className="relative z-10 mx-auto w-full max-w-6xl px-6 py-8">        {view === "analytics" ? (
           <AnalyticsView corpus={corpus} />
+        ) : view === "settings" ? (
+          <SettingsView
+            langPref={langPref}
+            onLangChange={setLangPref}
+            t={t}
+          />
         ) : (
           <>
         {/* Input */}
@@ -324,12 +357,9 @@ export default function Dashboard() {
               <div>
                 <CardTitle className="flex items-center gap-2 tracking-tight">
                   <ScanSearch className="size-5 text-blue-600 dark:text-blue-300" />
-                  Analyze a conversation
+                  {t.analyzeTitle}
                 </CardTitle>
-                <CardDescription className="mt-1">
-                  Paste a customer email, chat or ticket — get support intelligence and a
-                  phishing verdict in one pass.
-                </CardDescription>
+                <CardDescription className="mt-1">{t.analyzeDesc}</CardDescription>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {[...SAMPLE_EMAILS, { label: "Long thread: duplicate charge (summary demo)", text: DEMO_THREAD }].map((s) => (
@@ -351,7 +381,7 @@ export default function Dashboard() {
             <Textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Paste the customer message here…"
+              placeholder={t.inputPlaceholder}
               className="min-h-40 resize-y border-border/70 bg-white/60 dark:bg-white/5 text-sm"
             />
             <div className="flex flex-wrap items-center gap-2">
@@ -359,12 +389,12 @@ export default function Dashboard() {
                 type="text"
                 value={expectedDomain}
                 onChange={(e) => setExpectedDomain(e.target.value)}
-                placeholder="Your org domain (e.g. acme.com) — improves sender checks"
+                placeholder={t.domainPlaceholder}
                 className="h-9 max-w-xs border-border/70 bg-white/60 dark:bg-white/5 text-xs"
               />
               <Button type="button" onClick={analyze} disabled={!input.trim()} className="gap-2">
                 <ScanSearch className="size-4" />
-                Analyze message
+                {t.analyzeMessage}
               </Button>
               <Button
                 type="button"
@@ -374,7 +404,7 @@ export default function Dashboard() {
                 disabled={!input && !result}
               >
                 <RotateCcw className="size-4" />
-                Reset
+                {t.reset}
               </Button>
               <span className="ml-auto text-xs text-muted-foreground">
                 {input.trim() ? `${input.trim().split(/\s+/).length} words` : "No input yet"}
@@ -1151,6 +1181,85 @@ export default function Dashboard() {
           </>
         )}
       </main>
+    </div>
+  );
+}
+
+// ─── Settings view ─────────────────────────────────────────────────────────
+
+function SettingsView(props: {
+  langPref: LangPref;
+  onLangChange: (pref: LangPref) => void;
+  t: UIStrings;
+}) {
+  const { langPref, onLangChange, t } = props;
+  return (
+    <div className="grid gap-4">
+      <Card className="glass-panel-strong border-white/80 shadow-none">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 tracking-tight">
+            <Settings className="size-5 text-blue-600 dark:text-blue-300" />
+            {t.settingsTitle}
+          </CardTitle>
+          <CardDescription className="mt-1">{t.settingsDesc}</CardDescription>
+        </CardHeader>
+      </Card>
+
+      {/* Language selection */}
+      <Card className="glass-panel border-white/70 shadow-none">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Languages className="size-4 text-blue-600 dark:text-blue-300" />
+            {t.languageSection}
+          </CardTitle>
+          <CardDescription>{t.languageDesc}</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <Select value={langPref} onValueChange={(v) => onLangChange(v as LangPref)}>
+              <SelectTrigger className="glass-chip w-64 border-white/70">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">🌐 {t.autoDetect}</SelectItem>
+                {(Object.keys(LANG_LABELS) as SupportedLang[]).map((lang) => (
+                  <SelectItem key={lang} value={lang}>
+                    {LANG_LABELS[lang]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Badge className="glass-chip border-white/70 text-foreground shadow-none">
+              {t.currentPref}: {langPrefLabel(langPref)}
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {langPref === "auto" ? t.autoDetectDesc : t.prefApplied}
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Engine info */}
+      <Card className="glass-panel border-white/70 shadow-none">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Sparkles className="size-4 text-blue-600 dark:text-blue-300" />
+            {t.engineSection}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-2">
+          <div className="flex items-center gap-2">
+            <span className="relative flex size-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+              <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+            </span>
+            <span className="text-sm font-medium">
+              {t.engineTitle} — {t.engineOn}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">{t.engineDesc}</p>
+        </CardContent>
+      </Card>
     </div>
   );
 }

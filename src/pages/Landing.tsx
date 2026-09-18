@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { useLang } from "@/hooks/use-lang";
 import logo from "@/assets/logo.svg";
 
 const FEATURES = [
@@ -55,6 +56,7 @@ const FEATURES = [
 const CHANNELS = ["Email", "Live chat", "Support tickets", "Social DMs", "Contact forms"];
 
 export default function Landing() {
+  const { t } = useLang();
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -108,10 +110,7 @@ export default function Landing() {
             </span>
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg">
-            Threatly analyzes customer emails, chats and tickets to extract
-            complaint categories, sentiment and recurring issues — while scanning
-            the same conversation for phishing URLs, lookalike senders and
-            social-engineering attacks aimed at your support team.
+            {t.heroSubtitle}
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button asChild size="lg" className="gap-2 shadow-lg shadow-blue-600/20">

@@ -399,3 +399,26 @@ export const LEXICONS: Record<SupportedLang, LangLexicon> = {
 
 /** languages other than English, for iterating lexicon extras */
 export const NON_EN_LANGS: SupportedLang[] = ["es", "fr", "de", "pt", "hi"];
+
+// ─── user language preference (Settings) ──────────────────────────────────
+
+const PREFERRED_LANG_KEY = "threatly-lang";
+
+/** "auto" = per-message detection; a fixed lang = analyze every message in that language. */
+export type LangPref = SupportedLang | "auto";
+
+export function getPreferredLanguage(): LangPref {
+  const v = localStorage.getItem(PREFERRED_LANG_KEY);
+  return v && (v === "auto" || (LANG_LABELS as Record<string, unknown>)[v])
+    ? (v as LangPref)
+    : "auto";
+}
+
+export function setPreferredLanguage(pref: LangPref): void {
+  localStorage.setItem(PREFERRED_LANG_KEY, pref);
+}
+
+/** Label for a preference value ("Auto-detect", "English", "हिन्दी"…) */
+export function langPrefLabel(pref: LangPref): string {
+  return pref === "auto" ? "Auto-detect" : LANG_LABELS[pref];
+}
