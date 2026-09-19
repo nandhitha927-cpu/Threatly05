@@ -301,9 +301,73 @@ const FREE_MAIL = new Set([
 const SUSPICIOUS_TLDS = new Set([
   "zip", "mov", "top", "gq", "tk", "ml", "cf", "work", "click", "country",
   "stream", "gdn", "mom", "xin", "kim", "men", "rest", "cam", "quest", "cfd",
-  "xyz", "icu", "buzz", "cyou", "sbs", "live", "shop", "online", "site",
-  "space", "fun", "monster", "lol", "baby", "promo",
+  "buzz", "cyou", "sbs", "monster", "lol", "baby", "promo",
 ]);
+
+/**
+ * Registrable domains that genuinely belong to the brands we scan for.
+ * A URL hosted here is the real thing — never a lookalike — even though the
+ * host contains the brand name (www.amazon.co.uk, paypal.me, docs.stripe.com…).
+ */
+const OFFICIAL_BRAND_DOMAINS = new Set([
+  // amazon
+  "amazon.com", "amazon.co.uk", "amazon.de", "amazon.in", "amazon.es",
+  "amazon.fr", "amazon.it", "amazon.ca", "amazon.co.jp", "amazon.com.mx",
+  "amazon.com.br", "amazon.com.au", "amazon.ae", "amazon.nl", "amazon.se",
+  "amazon.sg", "amazon.sa", "amazon.com.tr", "primevideo.com",
+  // paypal
+  "paypal.com", "paypal.me", "paypalobjects.com",
+  // stripe
+  "stripe.com", "stripecdn.com", "stripe.network",
+  // chase
+  "chase.com", "chasecdn.com",
+  // wells fargo
+  "wellsfargo.com", "wf.com",
+  // microsoft
+  "microsoft.com", "live.com", "office.com", "office365.com", "microsoftonline.com",
+  "outlook.com", "azure.com", "azurewebsites.net", "msn.com", "windows.net",
+  "microsoftstore.com", "xbox.com",
+  // apple / icloud
+  "apple.com", "icloud.com", "me.com", "appleid.com", "appstore.com", "itunes.com",
+  // google / youtube
+  "google.com", "google.co.uk", "google.co.in", "google.de", "google.es",
+  "google.fr", "google.it", "google.ca", "google.com.br", "google.com.au",
+  "googleapis.com", "googleusercontent.com", "googleadservices.com",
+  "gstatic.com", "youtube.com", "youtu.be", "blogger.com", "withgoogle.com",
+  "googlemail.com", "android.com", "chromium.org",
+  // netflix
+  "netflix.com", "nflxvideo.net",
+  // facebook / instagram / whatsapp
+  "facebook.com", "fb.com", "fb.me", "instagram.com", "instagr.am", "whatsapp.com",
+  "meta.com",
+  // linkedin
+  "linkedin.com", "lnkd.in",
+  // crypto
+  "coinbase.com", "binance.com", "kraken.com",
+  // logistics
+  "dhl.com", "dhl.de", "fedex.com", "usps.com", "ups.com", "royalmail.com",
+  "canadapost.ca", "auspost.com.au", "bluedart.com",
+  // misc commerce / productivity
+  "flipkart.com", "myntra.com", "snapdeal.com", "shopify.com", "myshopify.com",
+  "ebay.com", "etsy.com", "walmart.com", "target.com", "bestbuy.com",
+  "zomato.com", "swiggy.com", "uber.com", "ola.com", "irctc.co.in",
+  "zoom.us", "slack.com", "notion.so", "atlassian.net", "salesforce.com",
+  "hubspot.com", "zendesk.com", "intercom.io", "freshworks.com", "freshdesk.com",
+  "adobe.com", "dropbox.com", "spotify.com", "twitter.com", "x.com", "tiktok.com",
+  "github.com", "githubusercontent.com", "gitlab.com", "bitbucket.org", "vercel.app",
+  "netlify.app", "cloudflare.com", "pages.dev", "workers.dev", "wordpress.com",
+  "wixsite.com", "wix.com", "squarespace.com", "godaddy.com", "namecheap.com",
+]);
+
+/** True when a hostname belongs to the brand's real estate (any ccTLD/subdomain). */
+function isOfficialBrandDomain(host: string): boolean {
+  const parts = host.split(".");
+  // walk every suffix so both "paypal.me" and "secure.paypal.com" match
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (OFFICIAL_BRAND_DOMAINS.has(parts.slice(i).join("."))) return true;
+  }
+  return false;
+}
 
 const HOMOGLYPHS: Record<string, string> = {
   "0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b",
@@ -355,12 +419,14 @@ export function parseUrl(raw: string): UrlFinding {
   let host = "";
   let path = "";
   let https = false;
+  let port = "";
   try {
     const withProto = /^https?:\/\//i.test(url) ? url : `http://${url}`;
     const u = new URL(withProto);
     host = u.hostname.toLowerCase();
     path = u.pathname + u.search;
     https = u.protocol === "https:";
+    port = u.port;
   } catch {
     host = url.replace(/^https?:\/\//i, "").split("/")[0].toLowerCase();
     path = url.slice(host.length);
@@ -376,24 +442,25 @@ export function parseUrl(raw: string): UrlFinding {
   let risk: UrlFinding["risk"] = "low";
 
   const hasUserinfo = /\/\/[^/@]*@/.test(url);
-  // redirect hints: open-redirect params, double protocol, embedded second URL
+  // redirect analysis: informational notes vs genuinely risky hop patterns
   const redirectHints: string[] = [];
+  const redirectRisks: string[] = [];
   const openRedirect = path.match(/[?&](?:url|next|redirect|redirect_url|return|returnUrl|continue|target|dest|destination|goto)=([^&\s]+)/i);
   if (openRedirect) {
-    redirectHints.push(`Redirect parameter "${openRedirect[1].slice(0, 60)}" — possible open-redirect abuse`);
+    redirectHints.push(`Redirect parameter "${openRedirect[1].slice(0, 60)}" (common in sign-in and tracking flows)`);
   }
   if ((url.match(/https?:\/\//gi) ?? []).length > 1) {
-    redirectHints.push("Multiple protocols embedded — URL may hop to another host");
+    redirectRisks.push("Multiple protocols embedded — URL may hop to another host");
   }
   if (openRedirect) {
     try {
       const inner = decodeURIComponent(openRedirect[1]);
       const innerHost = inner.match(/^https?:\/\/([^/]+)/i)?.[1];
-      if (innerHost && innerHost.toLowerCase() !== host) {
-        redirectHints.push(`Redirects onward to "${innerHost}" — destination differs from the visible domain`);
+      if (innerHost && innerHost.toLowerCase() !== host && !isOfficialBrandDomain(innerHost.toLowerCase())) {
+        redirectRisks.push(`Redirects onward to "${innerHost}" — destination differs from the visible domain`);
       }
     } catch {
-      // malformed encoding — the open-redirect flag above already stands
+      // malformed encoding — the embedded-protocol check above still stands
     }
   }
   const isPunycode = host.includes("xn--");
@@ -404,52 +471,81 @@ export function parseUrl(raw: string): UrlFinding {
   if (isPunycode) flags.push("Punycode-encoded host — may visually mimic another domain");
   if (url.length > 100) flags.push(`Unusually long URL (${url.length} chars)`);
   if (SHORTENERS.has(registrableDomain)) flags.push("URL shortener hides the true destination");
+  if (port && port !== "80" && port !== "443") flags.push(`Non-standard port :${port}`);
 
-  const suspChars = uniq(url.match(/[@%:~=${}[\]]/g) ?? []);
+  // "unusual characters" — : and = appear in every well-formed URL, so they
+  // are excluded; @ % ~ { } [ ] remain genuinely uncommon in links
+  const suspChars = uniq(url.match(/[@%~${}[\]]/g) ?? []);
   if (suspChars.length >= 2) flags.push("Contains unusual characters");
+  // credentials requested in the query string (?user=…&pass=…) — checked on
+  // the path+query portion; the old pattern demanded a "//" prefix that
+  // pathname+search can never contain, so it never matched anything
+  const hasCredentialsInUrl = /[?&](?:user|username|pass|password|token|otp|email)=/i.test(path);
 
   if (SUSPICIOUS_TLDS.has(tld)) flags.push(`High-abuse TLD ".${tld}"`);
 
-  // lookalike brand detection
+  // lookalike brand detection — skipped entirely for hosts that belong to the
+  // brand itself (www.amazon.co.uk, paypal.me, docs.stripe.com, secure07c.chase.com…)
   let lookalikeBrand: string | null = null;
   let lookalikeChars: string[] = [];
-  for (const [brand, variants] of BRANDS) {
-    for (const variant of variants) {
-      if (host.includes(variant)) {
-        lookalikeBrand = brand;
-        lookalikeChars = uniq(
-          variant.split("").filter((ch) => !brand.replace(/\s/g, "").includes(ch)),
-        );
-        break;
+  if (!isOfficialBrandDomain(host)) {
+    for (const [brand, variants] of BRANDS) {
+      for (const variant of variants) {
+        if (host.includes(variant)) {
+          lookalikeBrand = brand;
+          lookalikeChars = uniq(
+            variant.split("").filter((ch) => !brand.replace(/\s/g, "").includes(ch)),
+          );
+          break;
+        }
+      }
+      if (lookalikeBrand) break;
+    }
+    if (!lookalikeBrand) {
+      // normalise homoglyphs and re-check — "amazon-orders.com" still trips it
+      const normalized = host.replace(/[0-9@!$|]/g, (m) => HOMOGLYPHS[m] ?? m);
+      for (const [brand] of BRANDS) {
+        const brandNoSpace = brand.replace(/\s/g, "");
+        if (normalized.includes(brandNoSpace)) {
+          lookalikeBrand = brand;
+          lookalikeChars = uniq(host.split("").filter((ch) => /[0-9@!$|]/.test(ch)));
+          break;
+        }
       }
     }
-    if (lookalikeBrand) break;
-  }
-  if (!lookalikeBrand) {
-    // normalise homoglyphs and re-check the registrable domain
-    const normalized = host.replace(/[0-9@!$|]/g, (m) => HOMOGLYPHS[m] ?? m);
-    for (const [brand] of BRANDS) {
-      const brandNoSpace = brand.replace(/\s/g, "");
-      if (normalized.includes(brandNoSpace) && registrableDomain !== `${brandNoSpace}.com`) {
-        lookalikeBrand = brand;
-        lookalikeChars = uniq(host.split("").filter((ch) => /[0-9@!$|]/.test(ch)));
-        break;
+    if (!lookalikeBrand) {
+      // fuzzy edit-distance match on the registrable label (catches gooogle, paypall…)
+      const label = registrableDomain.split(".")[0];
+      if (label.length >= 4) {
+        for (const [brand] of BRANDS) {
+          const b = brand.replace(/\s/g, "");
+          const maxDist = b.length >= 6 ? 2 : 1;
+          const dist = levenshtein(label, b);
+          if (
+            dist >= 1 &&
+            dist <= maxDist &&
+            Math.abs(label.length - b.length) <= maxDist
+          ) {
+            lookalikeBrand = brand;
+            lookalikeChars = [];
+            break;
+          }
+        }
       }
     }
   }
-  if (!lookalikeBrand) {
-    // fuzzy edit-distance match on the registrable label (catches gooogle, paypall…)
-    const label = registrableDomain.split(".")[0];
-    if (label.length >= 4) {
+  if (!lookalikeBrand && !isOfficialBrandDomain(host)) {
+    // punycode hosts that decode toward a known brand (xn--pypal-4ve ≈ "pypal")
+    const firstLabel = host.split(".")[0];
+    const decodedLabel = firstLabel
+      .replace(/^xn--/, "")
+      .split("-")[0]
+      .replace(/[0-9]/g, "");
+    if (isPunycode && decodedLabel.length >= 4) {
       for (const [brand] of BRANDS) {
         const b = brand.replace(/\s/g, "");
-        const maxDist = b.length >= 6 ? 2 : 1;
-        const dist = levenshtein(label, b);
-        if (
-          dist >= 1 &&
-          dist <= maxDist &&
-          Math.abs(label.length - b.length) <= maxDist
-        ) {
+        const dist = levenshtein(decodedLabel, b);
+        if (dist >= 1 && dist <= (b.length >= 6 ? 2 : 1)) {
           lookalikeBrand = brand;
           lookalikeChars = [];
           break;
@@ -468,7 +564,13 @@ export function parseUrl(raw: string): UrlFinding {
   if (SHORTENERS.has(registrableDomain) && risk === "low") risk = "medium";
   if (SUSPICIOUS_TLDS.has(tld) && risk === "low") risk = "medium";
   if (suspChars.length >= 2 && risk === "low") risk = "medium";
-  if (redirectHints.length > 0 && risk === "low") risk = "medium";
+  if (redirectRisks.length > 0 && risk === "low") risk = "medium";
+  // a raw-IP link that also asks for credentials/OTP in the query string is a
+  // classic credential-harvesting pattern — not merely "unusual"
+  if (isIp && hasCredentialsInUrl && (risk === "low" || risk === "medium")) risk = "high";
+  if (redirectRisks.length > 0) {
+    flags.push(...redirectRisks);
+  }
   if (redirectHints.length > 0) {
     flags.push(...redirectHints);
   }
@@ -485,7 +587,7 @@ export function parseUrl(raw: string): UrlFinding {
     suspiciousChars: suspChars,
     lookalikeBrand,
     lookalikeChars,
-    hasCredentialsInUrl: /\/\/[^/?#]*[?&](?:user|username|pass|password|token|otp|email)=/i.test(path),
+    hasCredentialsInUrl,
     redirectHints,
     flags,
     risk,
@@ -544,10 +646,10 @@ export function parseEmail(raw: string, expectedDomain?: string): EmailFinding {
   }
 
   const normalized = domain.replace(/[0-9@!$|]/g, (m) => HOMOGLYPHS[m] ?? m);
-  if (!lookalikeBrand) {
+  if (!lookalikeBrand && !isOfficialBrandDomain(domain)) {
     for (const [brand] of BRANDS) {
       const brandNoSpace = brand.replace(/\s/g, "");
-      if (normalized.includes(brandNoSpace) && domain !== `${brandNoSpace}.com`) {
+      if (normalized.includes(brandNoSpace)) {
         lookalikeBrand = brand;
         lookalikeChars = uniq(domain.split("").filter((ch) => /[0-9@!$|]/.test(ch)));
         break;
@@ -566,7 +668,7 @@ export function parseEmail(raw: string, expectedDomain?: string): EmailFinding {
     flags.push("Numeric local part — common in throwaway accounts");
     risk = risk === "low" ? "medium" : risk;
   }
-  if (!lookalikeBrand) {
+  if (!lookalikeBrand && !isOfficialBrandDomain(domain)) {
     const label = domain.split(".")[0];
     if (label.length >= 4) {
       for (const [brand] of BRANDS) {
@@ -1515,8 +1617,13 @@ export function analyzeText(
     socialEngineering.push({ technique: TECHNIQUE_LABELS.authority, reason: "Sender claims organizational authority to demand compliance" });
     techniques.add("authority");
   }
-  if (/\b(password|passcode|pin|otp|one-time code|one time password|cvv|card number|card details|credit card)\b/i.test(text)) {
-    socialEngineering.push({ technique: TECHNIQUE_LABELS.credentials, reason: "Message references passwords, OTPs or card data" });
+  // credential-harvesting technique requires an actual REQUEST for secrets —
+  // merely mentioning "my password" in a support reply is normal, not an attack
+  if (
+    /\b(enter|provide|confirm|share|send|submit|reply with|give|reveal)\b[^.!?]{0,80}\b(password|passcode|pin|otp|one[- ]time (code|password)|cvv|card (number|details)|credit card|credentials)\b/i.test(text) ||
+    /\b(password|passcode|pin|otp|cvv)\b[^.!?]{0,40}\b(please|now|immediately)\b/i.test(text)
+  ) {
+    socialEngineering.push({ technique: TECHNIQUE_LABELS.credentials, reason: "Requests passwords, OTPs or card details from the reader" });
     techniques.add("credentials");
   }
   if (!techniques.has("credentials") && mlSe("credentials")) {
